@@ -8,7 +8,7 @@ import ffmpeg
 import argparse
 from tqdm import tqdm
 from ultralytics import YOLO
-from build_barbell_track import select_lifter_idx, build_barbell_track_from_keypoints
+from build_barbell_track import build_barbell_track_from_keypoints
 
 
 # ---------------------------------------------------------
@@ -113,11 +113,15 @@ if __name__ == "__main__":
     run_pose_inference(frames_dir, output_dir)
 
     images_dir = os.path.join(output_dir, "images")
-    frames_to_video(images_dir, output_video, fps=60)
+    image_files = [f for f in os.listdir(images_dir) if f.endswith(".jpg")]
 
-    delete_dir(frames_dir)
-
-    if args.clean:
-        delete_dir(images_dir)
+    if not image_files:
+        print("[ERROR] No rendered images found — skipping video reconstruction.")
     else:
-        print("[INFO] Keeping rendered images in pose_results/images")
+        frames_to_video(images_dir, output_video, fps=60)
+        delete_dir(frames_dir)
+
+        if args.clean:
+            delete_dir(images_dir)
+        else:
+            print("[INFO] Keeping rendered images in pose_results/images")
