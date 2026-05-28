@@ -39,8 +39,13 @@ def run_pose_inference(frames_dir, output_dir, model_path="yolov8n-pose.pt"):
     keypoints_out = os.path.join(output_dir, "keypoints")
     track_path = os.path.join(output_dir, "barbell_track.json")
 
-    os.makedirs(images_out, exist_ok=True)
-    os.makedirs(keypoints_out, exist_ok=True)
+    if os.path.exists(images_out):
+        shutil.rmtree(images_out)
+    os.makedirs(images_out)
+
+    if os.path.exists(keypoints_out):
+        shutil.rmtree(keypoints_out)
+    os.makedirs(keypoints_out)
 
     model = YOLO(model_path)
     frame_files = sorted(f for f in os.listdir(frames_dir) if f.endswith(".jpg"))
