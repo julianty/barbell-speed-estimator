@@ -21,11 +21,11 @@ ffmpeg must also be installed on your system and available on PATH.
 ## Usage
 
 ```bash
-# Run pipeline (intermediate files deleted after)
+# Run pipeline (reconstructs annotated video, keeps all output)
 python video_pose_infer.py videos/deadlift.mov
 
-# Keep extracted frames and per-frame keypoints
-python video_pose_infer.py videos/deadlift.mov --keep
+# Delete rendered images after reconstruction to save disk space
+python video_pose_infer.py videos/deadlift.mov --clean
 
 # Generate position/velocity plots from a saved track
 python analysis.py
