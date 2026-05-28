@@ -1,0 +1,6 @@
+ultralytics==8.4.41
+opencv-python==4.13.0.92
+ffmpeg-python==0.2.0
+numpy==2.4.4
+scipy==1.17.1
+matplotlib==3.10.9

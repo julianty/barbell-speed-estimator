@@ -13,7 +13,7 @@ Estimates barbell velocity from workout videos using YOLOv8 pose detection. Trac
 ## Requirements
 
 ```
-pip install ultralytics opencv-python ffmpeg-python numpy scipy matplotlib
+pip install -r requirements.txt
 ```
 
 ffmpeg must also be installed on your system and available on PATH.
