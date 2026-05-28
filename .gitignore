@@ -5,5 +5,12 @@
 
 *.mp4
 *.mov
+*.pt
+
+__pycache__/
+*.pyc
 
 bb-speed-env/
+.venv/
+venv/
+env/
