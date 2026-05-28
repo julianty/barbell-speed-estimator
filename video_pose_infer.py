@@ -8,7 +8,7 @@ import ffmpeg
 import argparse
 from tqdm import tqdm
 from ultralytics import YOLO
-from build_barbell_track import build_barbell_track_from_keypoints
+from build_barbell_track import select_lifter_idx, build_barbell_track_from_keypoints
 
 
 # ---------------------------------------------------------
@@ -37,6 +37,7 @@ def run_pose_inference(frames_dir, output_dir, keep=False, model_path="yolov8n-p
 
     images_out = os.path.join(output_dir, "images")
     keypoints_out = os.path.join(output_dir, "keypoints")
+    track_path = os.path.join(output_dir, "barbell_track.json")
 
     if keep:
         os.makedirs(images_out, exist_ok=True)
@@ -45,26 +46,27 @@ def run_pose_inference(frames_dir, output_dir, keep=False, model_path="yolov8n-p
     model = YOLO(model_path)
     frame_files = sorted(f for f in os.listdir(frames_dir) if f.endswith(".jpg"))
 
-    track = []  # used when keep=False
+    track = []
 
     for frame_file in tqdm(frame_files, desc="Running pose inference", unit="frame"):
         frame_path = os.path.join(frames_dir, frame_file)
         results = model(frame_path, verbose=False)
         kp = results[0].keypoints.xy.tolist() if results[0].keypoints is not None else None
+        h, w = results[0].orig_shape
+        frame_size = (w, h)
 
-        # If keep=True, save everything
         if keep:
             rendered = results[0].plot()
             cv2.imwrite(os.path.join(images_out, frame_file), rendered)
 
             with open(os.path.join(keypoints_out, frame_file.replace(".jpg", ".json")), "w") as f:
-                json.dump({"frame": frame_file, "keypoints": kp}, f, indent=2)
+                json.dump({"frame": frame_file, "keypoints": kp, "frame_size": frame_size}, f, indent=2)
 
-        # If keep=False, build barbell track directly
         else:
             if kp:
-                left = kp[0][9]
-                right = kp[0][10]
+                idx = select_lifter_idx(kp, *frame_size) if len(kp) > 1 else 0
+                left = kp[idx][9]
+                right = kp[idx][10]
                 center = [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2]
             else:
                 center = None
@@ -74,12 +76,12 @@ def run_pose_inference(frames_dir, output_dir, keep=False, model_path="yolov8n-p
                 "center": center
             })
 
-    # Save barbell track
-    track_path = os.path.join(output_dir, "barbell_track.json")
-
-    build_barbell_track_from_keypoints(keypoints_out, track_path)
-
-    print(f"[INFO] Saved barbell track to {track_path}")
+    if keep:
+        build_barbell_track_from_keypoints(keypoints_out, track_path)
+    else:
+        with open(track_path, "w") as f:
+            json.dump(track, f, indent=2)
+        print(f"[INFO] Saved barbell track to {track_path}")
 
 
 # ---------------------------------------------------------
