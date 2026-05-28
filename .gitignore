@@ -1,0 +1,7 @@
+/frames
+/videos
+/runs
+/pose_results/*
+
+*.mp4
+*.mov
