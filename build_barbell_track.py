@@ -14,7 +14,7 @@ def select_lifter_idx(keypoints, frame_w, frame_h):
     best_dist = float("inf")
 
     for i, person_kp in enumerate(keypoints):
-        pts = [p for p in person_kp if p[0] > 0 or p[1] > 0]
+        pts = [p for p in person_kp if p[0] > 0 and p[1] > 0]
         if not pts:
             continue
         px = sum(p[0] for p in pts) / len(pts)
