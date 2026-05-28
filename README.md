@@ -20,14 +20,12 @@ ffmpeg must also be installed on your system and available on PATH.
 
 ## Usage
 
-Set the video name and extension at the bottom of `video_pose_infer.py`, then run:
-
 ```bash
 # Run pipeline (intermediate files deleted after)
-python video_pose_infer.py
+python video_pose_infer.py videos/deadlift.mov
 
 # Keep extracted frames and per-frame keypoints
-python video_pose_infer.py --keep
+python video_pose_infer.py videos/deadlift.mov --keep
 
 # Generate position/velocity plots from a saved track
 python analysis.py

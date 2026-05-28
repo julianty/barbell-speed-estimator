@@ -6,6 +6,7 @@ import shutil
 import cv2
 import ffmpeg
 import argparse
+from tqdm import tqdm
 from ultralytics import YOLO
 from build_barbell_track import build_barbell_track_from_keypoints
 
@@ -23,7 +24,7 @@ def extract_frames(video_path, frames_dir, fps=None):
     else:
         stream = stream.output(output_pattern, qscale=2)
 
-    stream.run()
+    stream.run(quiet=True)
 
     print(f"[INFO] Frames extracted to: {frames_dir}")
 
@@ -46,9 +47,9 @@ def run_pose_inference(frames_dir, output_dir, keep=False, model_path="yolov8n-p
 
     track = []  # used when keep=False
 
-    for frame_file in frame_files:
+    for frame_file in tqdm(frame_files, desc="Running pose inference", unit="frame"):
         frame_path = os.path.join(frames_dir, frame_file)
-        results = model(frame_path)
+        results = model(frame_path, verbose=False)
         kp = results[0].keypoints.xy.tolist() if results[0].keypoints is not None else None
 
         # If keep=True, save everything
@@ -73,8 +74,6 @@ def run_pose_inference(frames_dir, output_dir, keep=False, model_path="yolov8n-p
                 "center": center
             })
 
-        print(f"[INFO] Processed {frame_file}")
-
     # Save barbell track
     track_path = os.path.join(output_dir, "barbell_track.json")
 
@@ -94,7 +93,7 @@ def frames_to_video(frames_dir, output_video_path, fps=30):
         .input(input_pattern, framerate=fps)
         .output(output_video_path, vcodec="libx264", pix_fmt="yuv420p")
         .overwrite_output()
-        .run()
+        .run(quiet=True)
     )
 
     print(f"[INFO] Reconstructed video saved to: {output_video_path}")
@@ -114,17 +113,18 @@ def delete_dir(path):
 # ---------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLO Pose Video Pipeline")
+    parser.add_argument("video", help="Path to the input video file (e.g. videos/deadlift.mov)")
     parser.add_argument("--keep", action="store_true",
                         help="Keep extracted frames and keypoints (default: delete them)")
     args = parser.parse_args()
 
-    video_name = "deadlift_2"
-    video_extension = ".mov"
-    video_path = f"videos/{video_name}{video_extension}"
+    video_path = args.video
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
     frames_dir = "frames"
     output_dir = "pose_results"
     output_video = os.path.join(output_dir, f"{video_name}_output.mp4")
 
+    print("[INFO] Extracting frames...")
     extract_frames(video_path, frames_dir)
     run_pose_inference(frames_dir, output_dir, keep=args.keep)
 
