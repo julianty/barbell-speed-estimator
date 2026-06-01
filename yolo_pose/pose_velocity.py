@@ -1,38 +1,21 @@
-# video_pose_infer.py
+# pose_velocity.py
 
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import os
 import json
 import shutil
 import cv2
-import ffmpeg
 import argparse
 from tqdm import tqdm
 from ultralytics import YOLO
 from build_barbell_track import build_barbell_track_from_keypoints
-
-
-# ---------------------------------------------------------
-# Extract frames
-# ---------------------------------------------------------
-def extract_frames(video_path, frames_dir, fps=None):
-    os.makedirs(frames_dir, exist_ok=True)
-    output_pattern = os.path.join(frames_dir, "frame_%06d.jpg").replace("\\", "/")
-
-    stream = ffmpeg.input(video_path)
-    if fps:
-        stream = stream.output(output_pattern, qscale=2, r=fps)
-    else:
-        stream = stream.output(output_pattern, qscale=2)
-
-    stream.run(quiet=True)
-
-    print(f"[INFO] Frames extracted to: {frames_dir}")
+from utils import extract_frames, frames_to_video
 
 
 # ---------------------------------------------------------
 # Pose inference
 # ---------------------------------------------------------
-def run_pose_inference(frames_dir, output_dir, model_path="yolov8n-pose.pt"):
+def run_pose_inference(frames_dir, output_dir, model_path="models/yolov8n-pose.pt"):
     os.makedirs(output_dir, exist_ok=True)
 
     images_out = os.path.join(output_dir, "images")
@@ -64,23 +47,6 @@ def run_pose_inference(frames_dir, output_dir, model_path="yolov8n-pose.pt"):
             json.dump({"frame": frame_file, "keypoints": kp, "frame_size": frame_size}, f, indent=2)
 
     build_barbell_track_from_keypoints(keypoints_out, track_path)
-
-
-# ---------------------------------------------------------
-# Rebuild video
-# ---------------------------------------------------------
-def frames_to_video(frames_dir, output_video_path, fps=30):
-    input_pattern = os.path.join(frames_dir, "frame_%06d.jpg").replace("\\", "/")
-
-    (
-        ffmpeg
-        .input(input_pattern, framerate=fps)
-        .output(output_video_path, vcodec="libx264", pix_fmt="yuv420p")
-        .overwrite_output()
-        .run(quiet=True)
-    )
-
-    print(f"[INFO] Reconstructed video saved to: {output_video_path}")
 
 
 # ---------------------------------------------------------

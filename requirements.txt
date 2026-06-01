@@ -1,7 +1,15 @@
+# Primary pipeline (SAM2)
+torch>=2.0
+torchvision>=0.15
+sam2
+
+# Legacy pipeline (YOLO)
 ultralytics==8.4.41
+matplotlib==3.10.9
+
+# Shared
 tqdm>=4.0
 opencv-python==4.13.0.92
 ffmpeg-python==0.2.0
 numpy==2.4.4
 scipy==1.17.1
-matplotlib==3.10.9
