@@ -50,7 +50,7 @@ def remove_outliers(positions, window=5, threshold=50):
     return arr.tolist()
 
 
-def smooth_positions(positions, window=9, poly=3):
+def smooth_positions(positions, window=36, poly=3):
     arr = np.array([p if p is not None else np.nan for p in positions])
     mask = np.isnan(arr)
     if np.any(mask):

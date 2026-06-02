@@ -1,7 +1,7 @@
 /frames
 /videos
 /runs
-/pose_results/*
+yolo_pose/pose_results/*
 
 *.mp4
 *.mov

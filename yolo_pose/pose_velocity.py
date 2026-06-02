@@ -11,6 +11,8 @@ from ultralytics import YOLO
 from build_barbell_track import build_barbell_track_from_keypoints
 from utils import extract_frames, frames_to_video
 
+MODEL_CODES = {"nano": "n", "small": "s", "medium": "m", "large": "l"}
+
 
 # ---------------------------------------------------------
 # Pose inference
@@ -36,15 +38,15 @@ def run_pose_inference(frames_dir, output_dir, model_path="models/yolov8n-pose.p
     for frame_file in tqdm(frame_files, desc="Running pose inference", unit="frame", ncols=80):
         frame_path = os.path.join(frames_dir, frame_file)
         results = model(frame_path, verbose=False)
-        kp = results[0].keypoints.xy.tolist() if results[0].keypoints is not None else None
-        h, w = results[0].orig_shape
-        frame_size = (w, h)
+        kp    = results[0].keypoints.xy.tolist() if results[0].keypoints is not None else []
+        boxes = results[0].boxes.xyxy.tolist()   if results[0].boxes is not None      else []
+        h, w  = results[0].orig_shape
 
         rendered = results[0].plot()
         cv2.imwrite(os.path.join(images_out, frame_file), rendered)
 
         with open(os.path.join(keypoints_out, frame_file.replace(".jpg", ".json")), "w") as f:
-            json.dump({"frame": frame_file, "keypoints": kp, "frame_size": frame_size}, f, indent=2)
+            json.dump({"frame": frame_file, "keypoints": kp, "boxes": boxes, "frame_size": (w, h)}, f, indent=2)
 
     build_barbell_track_from_keypoints(keypoints_out, track_path)
 
@@ -64,6 +66,8 @@ def delete_dir(path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLO Pose Video Pipeline")
     parser.add_argument("video", help="Path to the input video file (e.g. videos/deadlift.mov)")
+    parser.add_argument("model", choices=list(MODEL_CODES),
+                        help="YOLOv8-pose variant: nano | small | medium | large")
     parser.add_argument("--clean", action="store_true",
                         help="Delete rendered images after video reconstruction to save disk space")
     args = parser.parse_args()
@@ -71,12 +75,13 @@ if __name__ == "__main__":
     video_path = args.video
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     frames_dir = "frames"
-    output_dir = "pose_results"
+    output_dir = os.path.join("pose_results", video_name, args.model)
+    model_path = os.path.join("models", f"yolov8{MODEL_CODES[args.model]}-pose.pt")
     output_video = os.path.join(output_dir, f"{video_name}_output.mp4")
 
     print("[INFO] Extracting frames...")
     extract_frames(video_path, frames_dir)
-    run_pose_inference(frames_dir, output_dir)
+    run_pose_inference(frames_dir, output_dir, model_path=model_path)
 
     images_dir = os.path.join(output_dir, "images")
     image_files = [f for f in os.listdir(images_dir) if f.endswith(".jpg")]
@@ -90,4 +95,4 @@ if __name__ == "__main__":
         if args.clean:
             delete_dir(images_dir)
         else:
-            print("[INFO] Keeping rendered images in pose_results/images")
+            print("[INFO] Keeping rendered images in", images_dir)
