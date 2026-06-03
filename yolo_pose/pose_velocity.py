@@ -9,7 +9,7 @@ import argparse
 from tqdm import tqdm
 from ultralytics import YOLO
 from build_barbell_track import build_barbell_track_from_keypoints
-from utils import extract_frames, frames_to_video
+from utils import extract_frames, frames_to_video, get_video_fps
 
 MODEL_CODES = {"nano": "n", "small": "s", "medium": "m", "large": "l"}
 
@@ -79,9 +79,17 @@ if __name__ == "__main__":
     model_path = os.path.join("models", f"yolov8{MODEL_CODES[args.model]}-pose.pt")
     output_video = os.path.join(output_dir, f"{video_name}_output.mp4")
 
+    source_fps = get_video_fps(video_path)
+    print(f"[INFO] Detected source FPS: {source_fps:.3f}")
+
     print("[INFO] Extracting frames...")
     extract_frames(video_path, frames_dir)
     run_pose_inference(frames_dir, output_dir, model_path=model_path)
+
+    meta_path = os.path.join(output_dir, "meta.json")
+    with open(meta_path, "w") as f:
+        json.dump({"fps": source_fps, "video": video_path}, f, indent=2)
+    print(f"[INFO] Wrote metadata to {meta_path}")
 
     images_dir = os.path.join(output_dir, "images")
     image_files = [f for f in os.listdir(images_dir) if f.endswith(".jpg")]
@@ -89,7 +97,7 @@ if __name__ == "__main__":
     if not image_files:
         print("[ERROR] No rendered images found — skipping video reconstruction.")
     else:
-        frames_to_video(images_dir, output_video, fps=60)
+        frames_to_video(images_dir, output_video, fps=source_fps)
         delete_dir(frames_dir)
 
         if args.clean:

@@ -6,6 +6,13 @@ import numpy as np
 from scipy.signal import savgol_filter
 
 
+def get_video_fps(video_path: str) -> float:
+    probe = ffmpeg.probe(video_path)
+    video_stream = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    num, den = video_stream["r_frame_rate"].split("/")
+    return float(num) / float(den)
+
+
 def extract_frames(video_path: str, frames_dir: str, fps: float | None = None) -> None:
     os.makedirs(frames_dir, exist_ok=True)
     output_pattern = os.path.join(frames_dir, "frame_%06d.jpg").replace("\\", "/")
