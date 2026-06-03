@@ -11,6 +11,10 @@ from utils import compute_velocity, remove_outliers, smooth_positions
 
 # None | "ruptures" | "peaks" | "both"
 CONCENTRIC_METHOD = "both"
+MIN_FRAMES = 5             # minimum segment length (frames) to be considered a candidate
+MERGE_MIN_VEL = 50.0       # px/s; segments below this avg velocity are excluded from merge runs
+EXTENSION_LOOKAHEAD = 30   # frames; max boundary extension per side after candidate selection
+MIN_VEL_RATIO = 0.50       # candidates below this fraction of the top candidate's avg velocity are rejected
 
 
 def load_track(track_path):
@@ -41,7 +45,7 @@ def _draw_segment_overlay(ax, segments):
     for seg in segments:
         is_merged = seg.get("merged", False)
         if seg["selected"]:
-            color, alpha = "green", 0.25
+            color, alpha = "green", 0.0
         elif is_merged:
             color, alpha = "mediumpurple", 0.12
         elif seg["skipped_short"]:
@@ -52,12 +56,6 @@ def _draw_segment_overlay(ax, segments):
                    linestyle="--" if is_merged else "-",
                    edgecolor=color if is_merged else None, linewidth=1.2 if is_merged else 0)
         ax.axvline(seg["start"], color=color, linestyle=":", linewidth=0.8)
-        prefix = "[M] " if is_merged else ""
-        label = f'{prefix}{seg["displacement"]:+.0f}px\n({seg["frames"]}f)'
-        mid = (seg["start"] + seg["end"]) / 2
-        ax.text(mid, y_lo + y_range * 0.05, label,
-                fontsize=6, ha="center", va="bottom", color=color,
-                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color, alpha=0.7))
     ax.axvline(segments[-1]["end"], color="steelblue", linestyle=":", linewidth=0.8)
 
 
@@ -73,15 +71,17 @@ def _draw_ruptures_panel(ax, raw_pos, smooth_pos, smooth_vel, ruptures_phases, s
         ax.axvline(start, color="green", linestyle="--", linewidth=1.4)
         ax.axvline(end, color="darkgreen", linestyle="--", linewidth=1.4)
         avg_vel = float(np.mean(smooth_vel[start:end]))
+        max_vel = float(np.max(smooth_vel[start:end]))
         mid = (start + end) / 2
-        y_top = ax.get_ylim()[1]
+        y_top, y_lo = ax.get_ylim()[1], ax.get_ylim()[0]
+        y_offset = (y_top - y_lo) * 0.05
         if multi:
-            ax.text(mid, y_top, f"Rep {i + 1}\n{avg_vel:.1f} px/s",
+            ax.text(mid, y_top - y_offset, f"Rep {i + 1}\navg {avg_vel:.1f} | max {max_vel:.1f} px/s",
                     fontsize=8, ha="center", color="darkgreen", va="top")
         else:
-            ax.text(start + 1, y_top, "Start", fontsize=8, color="green", va="top")
-            ax.text(end + 1, y_top, "Lockout", fontsize=8, color="darkgreen", va="top")
-            ax.text(mid, y_top, f"{avg_vel:.1f} px/s",
+            ax.text(start + 1, y_top - y_offset, "Start", fontsize=8, color="green", va="top")
+            ax.text(end + 1, y_top - y_offset, "Lockout", fontsize=8, color="darkgreen", va="top")
+            ax.text(mid, y_top - y_offset, f"avg {avg_vel:.1f} | max {max_vel:.1f} px/s",
                     fontsize=8, ha="center", color="darkgreen", va="top",
                     bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="green", alpha=0.8))
 
@@ -100,9 +100,11 @@ def _draw_peaks_panel(ax, raw_pos, smooth_pos, smooth_vel, peaks_phases):
         ax.axvspan(trough, peak, color="green", alpha=0.15)
         mid = (trough + peak) / 2
         avg_vel = float(np.mean(smooth_vel[trough:peak]))
-        y_top = ax.get_ylim()[1]
-        ax.text(mid, y_top, f"Rep {i + 1}\n{avg_vel:.1f} px/s", fontsize=8, ha="center",
-                color="darkgreen", va="top")
+        max_vel = float(np.max(smooth_vel[trough:peak]))
+        y_top, y_lo = ax.get_ylim()[1], ax.get_ylim()[0]
+        y_offset = (y_top - y_lo) * 0.05
+        ax.text(mid, y_top - y_offset, f"Rep {i + 1}\navg {avg_vel:.1f} | max {max_vel:.1f} px/s",
+                fontsize=8, ha="center", color="darkgreen", va="top")
 
     n = len(peaks_phases)
     ax.set_title(f"Peaks — Detected Concentric Phases ({n} rep{'s' if n != 1 else ''})")
@@ -193,7 +195,11 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
             ax2.axvline(start, color="green", linestyle="--", linewidth=1.2)
             ax2.axvline(end, color="darkgreen", linestyle="--", linewidth=1.2)
             avg_vel = float(np.mean(smooth_vel[start:end]))
-            label = f"R{i + 1}: {avg_vel:.1f} px/s" if multi else f"Avg concentric velocity: {avg_vel:.1f} px/s"
+            max_vel = float(np.max(smooth_vel[start:end]))
+            if multi:
+                label = f"R{i + 1}: avg {avg_vel:.1f} | max {max_vel:.1f} px/s"
+            else:
+                label = f"avg {avg_vel:.1f} | max {max_vel:.1f} px/s"
             ax2.text(start, ax2.get_ylim()[1], label,
                      fontsize=7 if multi else 9, color="darkgreen", va="top", ha="left",
                      bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="green", alpha=0.85))
@@ -203,8 +209,9 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
             ax2.axvspan(trough, peak, color="green", alpha=0.15,
                         label="Concentric Phase" if i == 0 else "_nolegend_")
             avg_vel = float(np.mean(smooth_vel[trough:peak]))
+            max_vel = float(np.max(smooth_vel[trough:peak]))
             ax2.text(trough, ax2.get_ylim()[1],
-                     f"R{i + 1}: {avg_vel:.1f}",
+                     f"R{i + 1}: avg {avg_vel:.1f} | max {max_vel:.1f} px/s",
                      fontsize=7, color="darkgreen", va="top", ha="left")
 
     ax2.set_title("Barbell Velocity (px/s)")
@@ -278,7 +285,13 @@ if __name__ == "__main__":
     if CONCENTRIC_METHOD in ("ruptures", "both"):
         pen = 20
         ruptures_phases, ruptures_segments = detect_concentric(
-            smooth_positions_arr, method="ruptures", pen=pen, return_segments=True
+            smooth_positions_arr, method="ruptures", pen=pen,
+            min_frames=MIN_FRAMES,
+            smooth_velocity=smooth_velocity,
+            merge_min_vel=MERGE_MIN_VEL,
+            extension_lookahead=EXTENSION_LOOKAHEAD,
+            min_vel_ratio=MIN_VEL_RATIO,
+            return_segments=True,
         )
         print(f"[DEBUG] {len(ruptures_segments)} segments detected (pen={pen}):")
         for i, s in enumerate(ruptures_segments):
@@ -286,8 +299,6 @@ if __name__ == "__main__":
                 tag = " <-- SELECTED"
             elif s["skipped_short"]:
                 tag = " (short)"
-            elif s.get("no_eccentric_following"):
-                tag = " (no eccentric follows)"
             elif s.get("merged"):
                 tag = " (merged)"
             else:

@@ -15,22 +15,28 @@ def _interpolate(smoothed_positions):
 
 
 def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames: int = 20,
-                                require_following_eccentric: bool = True,
-                                min_eccentric_displacement: float = 20.0,
+                                smooth_velocity: np.ndarray = None,
+                                merge_min_vel: float = 50.0,
+                                extension_lookahead: int = 30,
+                                min_vel_ratio: float = 0.70,
                                 return_segments: bool = False):
     """
     Detect the concentric phase (greatest net upward displacement) using
     ruptures penalty-based changepoint detection.
 
-    If require_following_eccentric is True (default), candidates must be followed by at least
-    one segment with downward displacement >= min_eccentric_displacement px. This prevents
-    post-lift stand-up movements from being selected. Falls back to the unfiltered best if
-    no candidate passes (e.g. video ends at lockout).
+    smooth_velocity: optional fps-scaled velocity array (px/s). When provided,
+        merge_min_vel is compared against mean segment velocity in px/s and
+        boundary extension uses it for frame-level velocity checks.
+        When absent, merge_min_vel is treated as px/frame (displacement/frames).
+    min_vel_ratio: after candidate collection, reject candidates whose average velocity
+        is below this fraction of the highest average velocity among all candidates.
+        0.70 means a candidate must average at least 70% of the fastest rep's average.
+        Set to 0.0 to disable.
 
     Returns:
         list[tuple[int,int]]: [(start_frame, end_frame)] or [] on failure.
         If return_segments=True, returns (phases, segments) where segments is a list of
-        dicts: {start, end, displacement, frames, selected, skipped_short, no_eccentric_following}.
+        dicts: {start, end, displacement, frames, selected, skipped_short}.
     """
     arr = _interpolate(smoothed_positions)
 
@@ -53,19 +59,29 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
         too_short = n_frames < min_frames
 
         seg = dict(start=seg_start, end=seg_end, frames=n_frames,
-                   displacement=displacement, skipped_short=too_short,
-                   no_eccentric_following=False, selected=False)
+                   displacement=displacement, skipped_short=too_short, selected=False)
         segments.append(seg)
 
     # Merge adjacent positive-displacement segments into additional candidates.
-    # A run of 2+ consecutive positive segments may together form a valid concentric
-    # phase even if each individual segment was too short to qualify on its own.
+    # A run of 2+ consecutive non-short segments may together form a valid concentric
+    # phase even if each individual segment was below min_frames on its own.
+    def _qualifies(seg):
+        if seg["skipped_short"]:
+            return False
+        s, e = seg["start"], seg["end"]
+        if smooth_velocity is not None:
+            avg_vel = float(np.mean(smooth_velocity[s:e])) if e > s else 0.0
+        else:
+            avg_vel = seg["displacement"] / seg["frames"] if seg["frames"] > 0 else 0.0
+        return seg["displacement"] > 0 and avg_vel >= merge_min_vel
+
+    n_original = len(segments)
     i = 0
-    while i < len(segments):
-        if segments[i]["displacement"] > 0:
+    while i < n_original:
+        if _qualifies(segments[i]):
             run = [segments[i]]
             j = i + 1
-            while j < len(segments) and segments[j]["displacement"] > 0:
+            while j < n_original and _qualifies(segments[j]):
                 run.append(segments[j])
                 j += 1
             if len(run) > 1:
@@ -77,7 +93,6 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
                     start=m_start, end=m_end, frames=m_frames,
                     displacement=m_disp,
                     skipped_short=(m_frames < min_frames),
-                    no_eccentric_following=False,
                     selected=False,
                     merged=True,
                 ))
@@ -85,39 +100,73 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
         else:
             i += 1
 
-    def _has_following_eccentric(candidate_seg):
-        return any(
-            s["start"] > candidate_seg["end"] and s["displacement"] < -min_eccentric_displacement
-            for s in segments
-        )
-
     candidates = [s for s in segments if not s["skipped_short"] and s["displacement"] > 0]
 
-    if require_following_eccentric:
-        filtered = [s for s in candidates if _has_following_eccentric(s)]
-        if not filtered:
-            for s in candidates:
-                s["no_eccentric_following"] = True
-        else:
-            candidates = filtered
-            for s in segments:
-                if not s["skipped_short"] and s["displacement"] > 0 and not _has_following_eccentric(s):
-                    s["no_eccentric_following"] = True
+    # Reject candidates whose average velocity is below min_vel_ratio * global best average velocity.
+    if min_vel_ratio > 0.0 and len(candidates) > 1:
+        def _avg_vel(seg):
+            s, e = seg["start"], seg["end"]
+            if smooth_velocity is not None and e > s:
+                return float(np.mean(smooth_velocity[s:e]))
+            return seg["displacement"] / seg["frames"] if seg["frames"] > 0 else 0.0
 
-    # Prefer merged candidates (multi-rep): return all of them sorted by start frame.
-    # Fall back to single best individual segment if no merged candidates survived filtering.
+        ref_pool = [c for c in candidates if c.get("merged")] or candidates
+        global_avg = max(_avg_vel(c) for c in ref_pool)
+        if global_avg > 0:
+            vel_threshold = min_vel_ratio * global_avg
+            candidates = [c for c in candidates if _avg_vel(c) >= vel_threshold]
+
+    # Select merged candidates first; supplement with the best individual candidate per time
+    # window not covered by any merged candidate (handles reps that don't qualify for merge).
     merged_candidates = [s for s in candidates if s.get("merged")]
 
-    phases = []
-    if merged_candidates:
-        for seg in segments:
-            seg["selected"] = seg.get("merged", False) and seg in merged_candidates
-        phases = [(s["start"], s["end"]) for s in sorted(merged_candidates, key=lambda s: s["start"])]
-    elif candidates:
-        best = max(candidates, key=lambda s: s["displacement"])
-        for seg in segments:
-            seg["selected"] = (seg["start"] == best["start"] and seg["end"] == best["end"])
-        phases = [(best["start"], best["end"])]
+    sorted_merged = sorted(merged_candidates, key=lambda s: s["start"])
+    gaps = []
+    prev_end = 0
+    for m in sorted_merged:
+        gaps.append((prev_end, m["start"]))
+        prev_end = m["end"]
+    gaps.append((prev_end, len(arr)))
+
+    supplemental = []
+    for gap_start, gap_end in gaps:
+        gap_cands = [s for s in candidates
+                     if not s.get("merged") and s["start"] >= gap_start and s["end"] <= gap_end]
+        if gap_cands:
+            supplemental.append(max(gap_cands, key=lambda s: s["displacement"]))
+
+    all_selected = sorted(merged_candidates + supplemental, key=lambda s: s["start"])
+    if not all_selected and candidates:
+        all_selected = [max(candidates, key=lambda s: s["displacement"])]
+
+    for seg in segments:
+        seg["selected"] = seg in all_selected
+    phases = [(s["start"], s["end"]) for s in all_selected]
+
+    # Extend each selected phase boundary to better capture the full rep.
+    def _vel_at(frame):
+        if smooth_velocity is not None:
+            return float(smooth_velocity[frame])
+        return float(arr[frame] - arr[frame - 1]) if frame > 0 else 0.0
+
+    def _extend(start, end):
+        count = 0
+        while end + 1 < len(arr) and count < extension_lookahead:
+            if _vel_at(end) > 0 and arr[end + 1] > arr[end]:
+                end += 1
+                count += 1
+            else:
+                break
+        count = 0
+        while start - 1 >= 0 and count < extension_lookahead:
+            if _vel_at(start - 1) < 0:
+                start -= 1
+                count += 1
+            else:
+                break
+        return max(0, start), min(len(arr) - 1, end)
+
+    phases = [_extend(s, e) for s, e in phases]
 
     return (phases, segments) if return_segments else phases
 
