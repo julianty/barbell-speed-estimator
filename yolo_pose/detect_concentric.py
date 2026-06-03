@@ -29,8 +29,8 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
         boundary extension uses it for frame-level velocity checks.
         When absent, merge_min_vel is treated as px/frame (displacement/frames).
     min_vel_ratio: after candidate collection, reject candidates whose average velocity
-        is below this fraction of the highest average velocity among all candidates.
-        0.70 means a candidate must average at least 70% of the fastest rep's average.
+        is below this fraction of the median average velocity among merged candidates.
+        Uses median (not max) so a single fast noise burst cannot inflate the threshold.
         Set to 0.0 to disable.
 
     Returns:
@@ -111,7 +111,7 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
             return seg["displacement"] / seg["frames"] if seg["frames"] > 0 else 0.0
 
         ref_pool = [c for c in candidates if c.get("merged")] or candidates
-        global_avg = max(_avg_vel(c) for c in ref_pool)
+        global_avg = float(np.median([_avg_vel(c) for c in ref_pool]))
         if global_avg > 0:
             vel_threshold = min_vel_ratio * global_avg
             candidates = [c for c in candidates if _avg_vel(c) >= vel_threshold]
