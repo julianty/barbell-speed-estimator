@@ -446,7 +446,7 @@ def _extract_frames_for_sam2(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="SAM2 barbell plate velocity estimator")
-    parser.add_argument("--video", required=True, help="Path to input video file")
+    parser.add_argument("--video", default=None, help="Path to input video file (opens file picker if omitted)")
     parser.add_argument("--output", default=None, help="Output CSV path (default: sam2_results/<video_stem>/velocities.csv)")
     parser.add_argument("--fps", type=float, default=30.0, help="FPS fallback if not readable from file")
     parser.add_argument("--plate-mm", type=float, default=450.0, dest="plate_mm",
@@ -475,6 +475,11 @@ def main() -> None:
                         help="SAM2 memory bank size — past frames held in VRAM during propagation "
                              "(default: 7, reduce to 3-4 to cut VRAM use)")
     args = parser.parse_args()
+
+    if args.video is None:
+        from utils import pick_video_file
+        args.video = pick_video_file("Select a video for SAM2 analysis")
+    print(f"[INFO] Video: {args.video}")
 
     if args.output is None:
         stem = os.path.splitext(os.path.basename(args.video))[0]

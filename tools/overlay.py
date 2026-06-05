@@ -63,13 +63,18 @@ def draw_frame(img: np.ndarray, row: dict) -> np.ndarray:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overlay centroid/velocity on video frames")
-    parser.add_argument("--video", required=True, help="Original video file")
+    parser.add_argument("--video", default=None, help="Original video file (opens file picker if omitted)")
     parser.add_argument("--csv", default="velocities.csv", help="Velocities CSV from barbell_velocity.py")
     parser.add_argument("--output", default="overlay.mp4", help="Output annotated video path")
     parser.add_argument("--fps", type=float, default=30.0, help="FPS fallback")
     parser.add_argument("--frame-step", type=int, default=1, dest="frame_step",
                         help="Must match the --frame-step used during inference")
     args = parser.parse_args()
+
+    if args.video is None:
+        from utils import pick_video_file
+        args.video = pick_video_file("Select a video for overlay")
+    print(f"[INFO] Video: {args.video}")
 
     if not os.path.exists(args.video):
         sys.exit(f"[ERROR] Video not found: {args.video}")

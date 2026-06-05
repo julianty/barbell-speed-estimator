@@ -1,9 +1,41 @@
 # utils.py — shared utilities
 
 import os
+import sys
 import ffmpeg
 import numpy as np
 from scipy.signal import savgol_filter
+
+
+def pick_video_file(title: str = "Select a video file") -> str:
+    """Open a native file-picker dialog and return the chosen path.
+
+    Falls back to a stdin prompt if tkinter is unavailable or headless.
+    Exits if nothing is selected.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askopenfilename(
+            title=title,
+            filetypes=[
+                ("Video files", "*.mp4 *.mov *.avi *.mkv *.m4v *.wmv *.webm"),
+                ("All files", "*.*"),
+            ],
+        )
+        root.destroy()
+        if not path:
+            sys.exit("No video selected.")
+        return path
+    except Exception:
+        path = input("Enter video path: ").strip()
+        if not path:
+            sys.exit("No video selected.")
+        return path
 
 
 def get_video_fps(video_path: str) -> float:

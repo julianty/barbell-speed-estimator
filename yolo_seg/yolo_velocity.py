@@ -188,7 +188,7 @@ def _select_target_interactive(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="YOLOv8-seg barbell plate velocity estimator")
-    parser.add_argument("--video", required=True, help="Path to input video file")
+    parser.add_argument("--video", default=None, help="Path to input video file (opens file picker if omitted)")
     parser.add_argument(
         "--output", default=None,
         help="Output CSV path (default: yolo_results/<video_stem>/velocities.csv)",
@@ -208,6 +208,11 @@ def main() -> None:
     parser.add_argument("--conf", type=float, default=0.25,
                         help="Detection confidence threshold (default: 0.25)")
     args = parser.parse_args()
+
+    if args.video is None:
+        from utils import pick_video_file
+        args.video = pick_video_file("Select a video for YOLO-seg analysis")
+    print(f"[INFO] Video: {args.video}")
 
     if args.output is None:
         stem = os.path.splitext(os.path.basename(args.video))[0]

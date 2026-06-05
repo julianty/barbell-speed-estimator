@@ -65,12 +65,18 @@ def delete_dir(path):
 # ---------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLO Pose Video Pipeline")
-    parser.add_argument("video", help="Path to the input video file (e.g. videos/deadlift.mov)")
-    parser.add_argument("model", choices=list(MODEL_CODES),
-                        help="YOLOv8-pose variant: nano | small | medium | large")
+    parser.add_argument("model", choices=list(MODEL_CODES), nargs="?", default="small",
+                        help="YOLOv8-pose variant: nano | small | medium | large (default: small)")
+    parser.add_argument("--video", default=None,
+                        help="Path to the input video file (opens file picker if omitted)")
     parser.add_argument("--clean", action="store_true",
                         help="Delete rendered images after video reconstruction to save disk space")
     args = parser.parse_args()
+
+    if args.video is None:
+        from utils import pick_video_file
+        args.video = pick_video_file("Select a video for YOLO-pose analysis")
+    print(f"[INFO] Video: {args.video}")
 
     video_path = args.video
     video_name = os.path.splitext(os.path.basename(video_path))[0]
