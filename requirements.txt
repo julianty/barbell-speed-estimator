@@ -1,11 +1,12 @@
-# Primary pipeline (SAM2)
+# SAM2 pipeline
 torch>=2.0
 torchvision>=0.15
 sam2
 
-# Legacy pipeline (YOLO)
+# YOLO pipelines (pose + seg)
 ultralytics==8.4.41
 matplotlib==3.10.9
+ruptures>=1.1.9
 
 # Shared
 tqdm>=4.0
