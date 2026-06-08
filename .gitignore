@@ -2,6 +2,7 @@
 /videos
 /runs
 yolo_pose/pose_results/*
+/portfolio_analysis/
 
 *.mp4
 *.mov
