@@ -4,51 +4,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project does
 
-Estimates barbell velocity from workout videos. Three pipelines are available, organized into subdirectories. All scripts are run from the project root.
+Estimates barbell velocity from workout videos using computer vision. The investigation evaluated several approaches; the primary working pipeline uses YOLO Pose wrist keypoints as a barbell proxy with Savitzky-Golay smoothing and PELT-based concentric phase detection. Two segmentation-based pipelines (SAM2 and YOLO-seg) were also built; both track the barbell plate directly and output calibrated m/s velocity.
 
 ## Directory structure
 
 ```
-sam2/           SAM2 segmentation pipeline (primary)
-yolo_seg/       YOLOv8-seg pipeline (segmentation-based, no manual prompt needed)
-yolo_pose/      Legacy YOLOv8-pose pipeline (wrist keypoint proxy)
+yolo_pose/      Primary pipeline: YOLOv8-pose wrist-proxy tracking + concentric detection
+sam2/           SAM2 segmentation pipeline (plate tracking, found unreliable in real gym footage)
+yolo_seg/       YOLOv8-seg pipeline (plate tracking, no manual video prompt needed)
 tools/          Post-processing tools (overlay, plotting)
 utils.py        Shared utilities: frame extraction, velocity math
 models/         YOLOv8 .pt weight files
 videos/         Input videos (Bench/, Deadlift/, Squat/, Other/)
 sam2_results/   SAM2 pipeline outputs
 yolo_results/   YOLO-seg pipeline outputs
-pose_results/   Legacy YOLO-pose pipeline outputs
+pose_results/   YOLO-pose pipeline outputs
 ```
 
-## Primary pipeline — SAM2 plate segmentation
+## Primary pipeline — YOLO Pose wrist proxy
 
-**`sam2/barbell_velocity.py`** — Accepts a video, prompts the user to draw a bounding box around a plate on frame 0 (or accepts `--box` directly), runs SAM2 video propagation, extracts plate centroids, calibrates scale from the known plate diameter, and writes a CSV of per-frame velocity in m/s.
+Uses YOLOv8-pose keypoints to track wrist position as a proxy for the barbell. Outputs velocity in px/s. Absolute m/s conversion requires a calibration step (not yet implemented in this pipeline).
+
+1. **`yolo_pose/pose_velocity.py`** — Main entry point. Extracts frames via `ffmpeg`, runs YOLOv8-pose on each, builds `pose_results/<video>/<model>/barbell_track.json`, and reconstructs an annotated video.
+2. **`yolo_pose/build_barbell_track.py`** — Called by `pose_velocity.py`. Aggregates per-frame keypoint JSONs into a single track by averaging left/right wrist positions (COCO keypoints 9 and 10). Uses largest bounding box on frame 0 for person selection; subsequent frames lock via wrist proximity.
+3. **`yolo_pose/analysis.py`** — Standalone script. Loads `barbell_track.json`, removes outliers, smooths with Savitzky-Golay, computes velocity (px/s), and optionally detects concentric phases.
+4. **`yolo_pose/detect_concentric.py`** — Called by `analysis.py`. Two algorithms: `ruptures` PELT on the velocity signal (recommended), and `scipy` peak/trough detection. PELT output goes through segment merging, boundary extension, and velocity-ratio filtering.
 
 ```bash
-# Interactive box selection (opens frame 0)
+# Full YOLO-pose pipeline (default model: small)
+python yolo_pose/pose_velocity.py --video videos/deadlift.mov
+
+# Specify model size
+python yolo_pose/pose_velocity.py small --video videos/deadlift.mov
+python yolo_pose/pose_velocity.py large --video videos/deadlift.mov
+
+# Keep intermediate frames, keypoints, and annotated images
+python yolo_pose/pose_velocity.py --video videos/deadlift.mov --keep
+
+# Analysis and plotting (run after pose_velocity.py)
+python yolo_pose/analysis.py
+python yolo_pose/analysis.py --track pose_results/deadlift/small/barbell_track.json
+```
+
+**Concentric detection settings** (top of `analysis.py`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONCENTRIC_METHOD` | `"both"` | `None` \| `"ruptures"` \| `"peaks"` \| `"both"` |
+| `MIN_FRAMES` | `5` | Minimum segment length (frames) to be a candidate |
+| `MERGE_MIN_VEL` | `50.0` | px/s; segments below this avg velocity excluded from merge runs |
+| `EXTENSION_LOOKAHEAD` | `30` | Max boundary extension per side (frames) after candidate selection |
+| `MIN_VEL_RATIO` | `0.50` | Reject candidates below this fraction of the median candidate velocity |
+
+**Output:** `pose_results/<video>/<model>/barbell_track.json` + annotated video + `bar_speed.png` plot
+
+## SAM2 pipeline (experimental)
+
+Tracks the barbell plate directly using SAM2 video segmentation. Calibrates scale from the known plate diameter and outputs velocity in m/s. Found unreliable on real gym footage — tracking can drift, lose the object, or latch onto the wrong region mid-lift.
+
+**`sam2/barbell_velocity.py`** — User draws a bounding box or clicks a point on the plate in frame 0; SAM2 propagates the mask through the video. Interactive recovery prompt if tracking is lost.
+
+```bash
+# Interactive prompt (opens frame 0)
 python sam2/barbell_velocity.py --video videos/deadlift.mov
 
 # Non-interactive with a known box
 python sam2/barbell_velocity.py --video videos/deadlift.mov --box "100,200,400,500"
-
-# Full options
-python sam2/barbell_velocity.py \
-  --video videos/deadlift.mov \
-  --output results/velocities.csv \
-  --fps 60 \
-  --plate-mm 450 \
-  --model small
 ```
 
-**CLI arguments:**
+**Key CLI arguments:**
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--video` | required | Path to input video |
 | `--output` | `sam2_results/<stem>/velocities.csv` | Output CSV path |
-| `--fps` | `30` | FPS fallback if not readable from file |
-| `--plate-mm` | `450` | Known plate diameter in mm |
+| `--plate-mm` | `450` | Known plate diameter in mm (used for scale calibration) |
 | `--model` | `small` | SAM2 variant: `tiny` \| `small` \| `large` |
 | `--box` | (interactive) | `"x_min,y_min,x_max,y_max"` for frame 0 |
 | `--point` | (interactive) | `"x,y"` single foreground point for frame 0 |
@@ -57,44 +87,37 @@ python sam2/barbell_velocity.py \
 | `--max-seconds` | (none) | Only process first N seconds |
 | `--frame-step` | `1` | Process every Nth frame |
 | `--offload-to-cpu` | off | Keep frame features and inference state in CPU RAM instead of VRAM |
-| `--num-maskmem` | `7` | SAM2 memory bank size (past frames held during propagation); reduce to 3-4 to cut VRAM use |
-
-**Interactive mode behaviour (stdin is a TTY):**
-- After the initial box/point, a preview window shows the SAM2 mask on frame 0. Left-click adds foreground points, right-click adds background points, B enters box-draw mode (drag to draw a bounding box that replaces the current prompt), Z undoes the last added point, R resets to the original/last-committed prompt, Enter/Space accepts.
-- During propagation, if tracking is lost for `--lost-threshold` consecutive frames, a recovery window opens on the first lost frame. Press B to draw a box, P to click a point, S to skip.
+| `--num-maskmem` | `7` | SAM2 memory bank size; reduce to 3-4 to cut VRAM use |
 
 **Output CSV columns:** `frame, timestamp_s, cx_px, cy_px, velocity_ms, smoothed_velocity_ms`
 
+SAM2 model is loaded from HuggingFace (`facebook/sam2-hiera-{tiny,small,large}`); uses float16 + CUDA autocast when available.
+
 ## YOLO-seg pipeline
 
-**`yolo_seg/yolo_velocity.py`** — Uses YOLOv8 instance segmentation + BotSORT tracking. Interactive plate selection on frame 0; everything downstream (outlier removal, smoothing, velocity, CSV format) is identical to the SAM2 pipeline.
+Tracks the barbell plate using YOLOv8 instance segmentation + BotSORT tracking. No manual video prompt: user selects the plate from detected objects on frame 0 (or the first frame with a detection). Same downstream processing and CSV format as the SAM2 pipeline; outputs velocity in m/s.
+
+**`yolo_seg/yolo_velocity.py`**
 
 ```bash
 python yolo_seg/yolo_velocity.py --video videos/deadlift.mov
 python yolo_seg/yolo_velocity.py --video videos/deadlift.mov --model small --no-preview
 ```
 
-Output goes to `yolo_results/<video_stem>/velocities.csv`.
+**Key CLI arguments:**
 
-## Legacy pipeline — YOLO wrist proxy
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--video` | required | Path to input video |
+| `--output` | `yolo_results/<stem>/velocities.csv` | Output CSV path |
+| `--plate-mm` | `450` | Known plate diameter in mm |
+| `--model` | `nano` | YOLOv8-seg variant: `nano` \| `small` \| `medium` |
+| `--frame-step` | `1` | Process every Nth frame |
+| `--max-seconds` | (none) | Only process first N seconds |
+| `--no-preview` | off | Auto-pick largest mask on frame 0 (skip interactive selection) |
+| `--conf` | `0.25` | Detection confidence threshold |
 
-Uses YOLOv8n-pose wrist keypoints as a barbell proxy. Less precise than segmentation pipelines but faster and requires no manual annotation.
-
-1. **`yolo_pose/pose_velocity.py`** — Main entry point. Extracts frames via `ffmpeg`, runs YOLOv8n-pose on each, builds `pose_results/barbell_track.json`, and optionally reconstructs an annotated video.
-2. **`yolo_pose/build_barbell_track.py`** — Called by `pose_velocity.py`. Aggregates per-frame keypoint JSONs into a single track by averaging left/right wrist positions (COCO keypoints 9 and 10).
-3. **`yolo_pose/analysis.py`** — Standalone script. Loads `barbell_track.json`, removes outliers, smooths with Savitzky–Golay, computes velocity, and saves a plot to `pose_results/analysis/bar_speed.png`.
-4. **`yolo_pose/detect_concentric.py`** — Called by `analysis.py`. Detects concentric phase by comparing position to a baseline (first N frames) and a near-global maximum threshold.
-
-```bash
-# Full YOLO-pose pipeline
-python yolo_pose/pose_velocity.py videos/deadlift.mov
-
-# Keep intermediate frames, keypoints, and annotated images
-python yolo_pose/pose_velocity.py videos/deadlift.mov --keep
-
-# Analysis and plotting (run after pose_velocity.py)
-python yolo_pose/analysis.py
-```
+**Output CSV columns:** `frame, timestamp_s, cx_px, cy_px, velocity_ms, smoothed_velocity_ms`
 
 ## Post-processing tools
 
@@ -117,27 +140,30 @@ python tools/plot_velocity.py --input sam2_results/deadlift/velocities.csv --sho
 - `extract_frames(video_path, frames_dir, fps=None)` — extracts JPEG frames via ffmpeg
 - `frames_to_video(frames_dir, output_video_path, fps=30)` — reconstructs video from frames
 - `remove_outliers(positions, window=5, threshold=50)` — median-based outlier removal
-- `smooth_positions(positions, window=9, poly=3)` — Savitzky–Golay smoothing
+- `smooth_positions(positions, window=9, poly=3)` — Savitzky-Golay smoothing
 - `compute_velocity(positions, fps)` — finite-difference velocity
+- `pick_video_file(title)` — opens a file picker dialog (used when `--video` is omitted)
+- `get_video_fps(video_path)` — reads FPS via OpenCV
 
 ## Key data formats
 
-- **Keypoint JSON** (`pose_results/keypoints/frame_XXXXXX.json`): `{ "frame": "...", "keypoints": [[[x, y], ...17 points...]] }` — COCO 17-keypoint format, one person assumed.
-- **Barbell track JSON** (`pose_results/barbell_track.json`): `[{ "frame": "...", "center": [x, y] }, ...]` — `center` is `null` when no person was detected.
-- **Velocity CSV** (`velocities.csv`): `frame, timestamp_s, cx_px, cy_px, velocity_ms, smoothed_velocity_ms`
+- **Keypoint JSON** (`pose_results/<video>/<model>/keypoints/frame_XXXXXX.json`): `{ "frame": "...", "keypoints": [...], "boxes": [...], "frame_size": [w, h] }` — COCO 17-keypoint format.
+- **Barbell track JSON** (`pose_results/<video>/<model>/barbell_track.json`): `[{ "frame": "...", "center": [x, y] }, ...]` — `center` is `null` when no person was detected.
+- **Meta JSON** (`pose_results/<video>/<model>/meta.json`): `{ "fps": ..., "video": "..." }` — written by `pose_velocity.py`; read by `analysis.py` to avoid hardcoding FPS.
+- **Velocity CSV** (`velocities.csv`): `frame, timestamp_s, cx_px, cy_px, velocity_ms, smoothed_velocity_ms` — used by SAM2 and YOLO-seg pipelines. YOLO-pose outputs px/s via plots rather than CSV.
 
 ## Dependencies
 
-**SAM2 pipeline:** `torch`, `torchvision`, `transformers` (HuggingFace), `opencv-python`, `numpy`, `scipy`, `ffmpeg-python`
+**SAM2 pipeline:** `torch`, `torchvision`, `transformers` (HuggingFace), `sam2`, `opencv-python`, `numpy`, `scipy`, `ffmpeg-python`
 
-**YOLO pipelines:** `ultralytics`, `opencv-python`, `ffmpeg-python`, `numpy`, `scipy`, `matplotlib`
+**YOLO pipelines:** `ultralytics`, `opencv-python`, `ffmpeg-python`, `numpy`, `scipy`, `matplotlib`, `ruptures` (for concentric detection)
 
 ## Notable design decisions
 
-- SAM2 model is loaded from HuggingFace (`facebook/sam2-hiera-{tiny,small,large}`); uses float16 + CUDA autocast when available.
-- Scale calibration derives `px/mm` from the vertical span of the plate mask bounding box on frame 0.
-- Y-axis is flipped (`-cy`) throughout so that upward movement is positive velocity.
+- Y-axis is flipped (`-cy`) throughout all pipelines so that upward movement is positive velocity.
 - Velocity math (`remove_outliers`, `smooth_positions`, `compute_velocity`) lives in `utils.py` and is shared by all three pipelines.
+- YOLO Pose pipeline outputs px/s. The segmentation pipelines (SAM2, YOLO-seg) derive `px/mm` from the plate mask on the calibration frame and output m/s directly.
+- PELT changepoint detection runs on the **velocity signal** (first difference of smoothed position), not on raw position. Applying PELT to position over-segments rising trends; differentiating first collapses a clean concentric phase into a near-zero-mean segment that PELT finds as one coherent piece.
+- Velocity-ratio filtering in PELT uses the **median** of merged-candidate velocities as the reference (not the max), so a single fast noise burst cannot inflate the rejection threshold.
 - Each pipeline script inserts the project root into `sys.path` at startup so `utils` is always importable regardless of CWD.
-- `--clean` in `pose_velocity.py` controls whether intermediate frames and per-frame keypoint JSONs are preserved; by default they are kept.
-- Concentric detection is toggled by `ENABLE_CONCENTRIC = False` in `yolo_pose/analysis.py`.
+- `pose_velocity.py` defaults to keeping intermediate frames and keypoint JSONs; pass `--clean` to delete them after video reconstruction.
