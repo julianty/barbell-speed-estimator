@@ -5,6 +5,7 @@ import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspa
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 
 from detect_concentric import detect_concentric
 from utils import compute_velocity, remove_outliers, smooth_positions
@@ -14,7 +15,7 @@ CONCENTRIC_METHOD = "both"
 MIN_FRAMES = 5             # minimum segment length (frames) to be considered a candidate
 MERGE_MIN_VEL = 50.0       # px/s; segments below this avg velocity are excluded from merge runs
 EXTENSION_LOOKAHEAD = 30   # frames; max boundary extension per side after candidate selection
-MIN_VEL_RATIO = 0.50       # candidates below this fraction of the top candidate's avg velocity are rejected
+MIN_REP_RATIO = 0.60       # candidates must cover at least this fraction of the estimated full-rep displacement
 
 
 def load_track(track_path):
@@ -89,6 +90,8 @@ def _draw_ruptures_panel(ax, raw_pos, smooth_pos, smooth_vel, ruptures_phases, s
     ax.set_title(f"Ruptures — Detected Concentric Phase{'s' if n != 1 else ''} ({n} rep{'s' if n != 1 else ''})")
     ax.set_xlabel("Frame")
     ax.set_ylabel("Position")
+    ax.xaxis.set_major_locator(MultipleLocator(50))
+    ax.tick_params(axis='x', labelsize=7)
     ax.legend()
 
 
@@ -110,6 +113,8 @@ def _draw_peaks_panel(ax, raw_pos, smooth_pos, smooth_vel, peaks_phases):
     ax.set_title(f"Peaks — Detected Concentric Phases ({n} rep{'s' if n != 1 else ''})")
     ax.set_xlabel("Frame")
     ax.set_ylabel("Position")
+    ax.xaxis.set_major_locator(MultipleLocator(50))
+    ax.tick_params(axis='x', labelsize=7)
     ax.legend()
 
 
@@ -179,6 +184,8 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
     ax1.set_title("Barbell Vertical Position (px, upward = positive)")
     ax1.set_xlabel("Frame")
     ax1.set_ylabel("Position")
+    ax1.xaxis.set_major_locator(MultipleLocator(50))
+    ax1.tick_params(axis='x', labelsize=7)
     ax1.legend()
     panel += 1
 
@@ -217,6 +224,8 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
     ax2.set_title("Barbell Velocity (px/s)")
     ax2.set_xlabel("Frame")
     ax2.set_ylabel("Velocity")
+    ax2.xaxis.set_major_locator(MultipleLocator(50))
+    ax2.tick_params(axis='x', labelsize=7)
     ax2.legend()
 
     plt.tight_layout()
@@ -290,7 +299,7 @@ if __name__ == "__main__":
             smooth_velocity=smooth_velocity,
             merge_min_vel=MERGE_MIN_VEL,
             extension_lookahead=EXTENSION_LOOKAHEAD,
-            min_vel_ratio=MIN_VEL_RATIO,
+            min_rep_ratio=MIN_REP_RATIO,
             return_segments=True,
         )
         print(f"[DEBUG] {len(ruptures_segments)} segments detected (pen={pen}):")

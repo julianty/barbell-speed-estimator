@@ -18,20 +18,23 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
                                 smooth_velocity: np.ndarray = None,
                                 merge_min_vel: float = 50.0,
                                 extension_lookahead: int = 30,
-                                min_vel_ratio: float = 0.70,
+                                min_rep_ratio: float = 0.60,
                                 return_segments: bool = False):
     """
-    Detect the concentric phase (greatest net upward displacement) using
-    ruptures penalty-based changepoint detection.
+    Detect concentric phases using ruptures PELT changepoint detection on the velocity signal.
 
-    smooth_velocity: optional fps-scaled velocity array (px/s). When provided,
-        merge_min_vel is compared against mean segment velocity in px/s and
-        boundary extension uses it for frame-level velocity checks.
-        When absent, merge_min_vel is treated as px/frame (displacement/frames).
-    min_vel_ratio: after candidate collection, reject candidates whose average velocity
-        is below this fraction of the median average velocity among merged candidates.
-        Uses median (not max) so a single fast noise burst cannot inflate the threshold.
-        Set to 0.0 to disable.
+    Pipeline:
+      1. PELT on velocity signal → segment boundaries
+      2. Per-segment stats (displacement, length, short flag)
+      3. Merge adjacent qualifying segments into synthetic candidates
+      4. Collect candidate pool (positive displacement, not too short)
+      5. Estimate expected rep displacement from movement range (peak/trough analysis)
+      6. Select candidates covering >= min_rep_ratio of expected displacement;
+         deduplicate overlapping candidates (prefer merged, then higher displacement)
+      7. Extend each selected phase boundary outward while velocity conditions hold
+
+    min_rep_ratio: fraction of the estimated full-rep displacement a candidate must cover
+        to be selected. Set to 0.0 to disable (select all positive-displacement candidates).
 
     Returns:
         list[tuple[int,int]]: [(start_frame, end_frame)] or [] on failure.
@@ -43,11 +46,13 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
     if np.isnan(arr).all():
         return ([], []) if return_segments else []
 
+    # Stage 1: run PELT on the velocity signal (first diff of position)
     vel = np.diff(arr)
     algo = rpt.Pelt(model="l2").fit(vel)
     vel_breakpoints = algo.predict(pen=pen)
     boundaries = [0] + vel_breakpoints
 
+    # Stage 2: build per-segment stats (displacement, length, short flag)
     segments = []
     for i in range(len(boundaries) - 1):
         v_start = boundaries[i]
@@ -62,7 +67,7 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
                    displacement=displacement, skipped_short=too_short, selected=False)
         segments.append(seg)
 
-    # Merge adjacent positive-displacement segments into additional candidates.
+    # Stage 3: merge adjacent qualifying segments into additional candidates.
     # A run of 2+ consecutive non-short segments may together form a valid concentric
     # phase even if each individual segment was below min_frames on its own.
     def _qualifies(seg):
@@ -70,7 +75,8 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
             return False
         s, e = seg["start"], seg["end"]
         if smooth_velocity is not None:
-            avg_vel = float(np.mean(smooth_velocity[s:e])) if e > s else 0.0
+            vel_slice = smooth_velocity[s + 1 : e + 1]
+            avg_vel = float(np.mean(vel_slice)) if vel_slice else 0.0
         else:
             avg_vel = seg["displacement"] / seg["frames"] if seg["frames"] > 0 else 0.0
         return seg["displacement"] > 0 and avg_vel >= merge_min_vel
@@ -100,42 +106,38 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
         else:
             i += 1
 
+    # Stage 4: collect all positive-displacement non-short segments as candidates
     candidates = [s for s in segments if not s["skipped_short"] and s["displacement"] > 0]
 
-    # Reject candidates whose average velocity is below min_vel_ratio * global best average velocity.
-    if min_vel_ratio > 0.0 and len(candidates) > 1:
-        def _avg_vel(seg):
-            s, e = seg["start"], seg["end"]
-            if smooth_velocity is not None and e > s:
-                return float(np.mean(smooth_velocity[s:e]))
-            return seg["displacement"] / seg["frames"] if seg["frames"] > 0 else 0.0
+    # Stage 5: estimate expected rep displacement from movement range (peak/trough analysis)
+    def _estimate_rep_displacement(a):
+        distance = max(1, len(a) // 20)
+        prominence = (np.nanmax(a) - np.nanmin(a)) * 0.15
+        peaks, _ = find_peaks(a, distance=distance, prominence=prominence)
+        troughs, _ = find_peaks(-a, distance=distance, prominence=prominence)
+        displacements = []
+        peak_cursor = 0
+        for trough in troughs:
+            while peak_cursor < len(peaks) and peaks[peak_cursor] <= trough:
+                peak_cursor += 1
+            if peak_cursor < len(peaks):
+                displacements.append(float(a[peaks[peak_cursor]] - a[trough]))
+        return float(np.median(displacements)) if displacements else float(np.nanmax(a) - np.nanmin(a))
 
-        ref_pool = [c for c in candidates if c.get("merged")] or candidates
-        global_avg = float(np.median([_avg_vel(c) for c in ref_pool]))
-        if global_avg > 0:
-            vel_threshold = min_vel_ratio * global_avg
-            candidates = [c for c in candidates if _avg_vel(c) >= vel_threshold]
+    expected_disp = _estimate_rep_displacement(arr)
+    qualified = [c for c in candidates if c["displacement"] >= min_rep_ratio * expected_disp]
 
-    # Select merged candidates first; supplement with the best individual candidate per time
-    # window not covered by any merged candidate (handles reps that don't qualify for merge).
-    merged_candidates = [s for s in candidates if s.get("merged")]
+    # Stage 6: deduplicate — prefer merged candidates, then higher displacement; greedy non-overlapping
+    qualified_sorted = sorted(qualified,
+                              key=lambda s: (s.get("merged", False), s["displacement"]),
+                              reverse=True)
+    all_selected = []
+    for cand in qualified_sorted:
+        if not any(cand["start"] < sel["end"] and sel["start"] < cand["end"]
+                   for sel in all_selected):
+            all_selected.append(cand)
+    all_selected.sort(key=lambda s: s["start"])
 
-    sorted_merged = sorted(merged_candidates, key=lambda s: s["start"])
-    gaps = []
-    prev_end = 0
-    for m in sorted_merged:
-        gaps.append((prev_end, m["start"]))
-        prev_end = m["end"]
-    gaps.append((prev_end, len(arr)))
-
-    supplemental = []
-    for gap_start, gap_end in gaps:
-        gap_cands = [s for s in candidates
-                     if not s.get("merged") and s["start"] >= gap_start and s["end"] <= gap_end]
-        if gap_cands:
-            supplemental.append(max(gap_cands, key=lambda s: s["displacement"]))
-
-    all_selected = sorted(merged_candidates + supplemental, key=lambda s: s["start"])
     if not all_selected and candidates:
         all_selected = [max(candidates, key=lambda s: s["displacement"])]
 
@@ -143,7 +145,7 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
         seg["selected"] = seg in all_selected
     phases = [(s["start"], s["end"]) for s in all_selected]
 
-    # Extend each selected phase boundary to better capture the full rep.
+    # Stage 7: extend each selected phase boundary outward while velocity conditions hold
     def _vel_at(frame):
         if smooth_velocity is not None:
             return float(smooth_velocity[frame])
@@ -159,7 +161,7 @@ def detect_concentric_ruptures(smoothed_positions, pen: float = 3.0, min_frames:
                 break
         count = 0
         while start - 1 >= 0 and count < extension_lookahead:
-            if _vel_at(start - 1) < 0:
+            if _vel_at(start - 1) > 0:
                 start -= 1
                 count += 1
             else:
