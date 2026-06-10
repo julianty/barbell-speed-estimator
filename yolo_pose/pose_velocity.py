@@ -11,7 +11,8 @@ from ultralytics import YOLO
 from build_barbell_track import build_barbell_track_from_keypoints
 from utils import extract_frames, frames_to_video, get_video_fps
 
-MODEL_CODES = {"nano": "n", "small": "s", "medium": "m", "large": "l"}
+# Maps CLI model name → single-letter suffix used in YOLO weight filenames (e.g. "small" → "yolo26s-pose.pt")
+MODEL_CODES = {"nano": "n", "small": "s", "medium": "m", "large": "l", "xlarge": "x"}
 
 
 # ---------------------------------------------------------
@@ -32,7 +33,7 @@ def run_pose_inference(frames_dir, output_dir, model_path="models/yolov8n-pose.p
         shutil.rmtree(keypoints_out)
     os.makedirs(keypoints_out)
 
-    model = YOLO(model_path)
+    model = YOLO(model_path)  # model_path set by caller, e.g. models/yolov8s-pose.pt
     frame_files = sorted(f for f in os.listdir(frames_dir) if f.endswith(".jpg"))
 
     for frame_file in tqdm(frame_files, desc="Running pose inference", unit="frame", ncols=80):
@@ -65,8 +66,10 @@ def delete_dir(path):
 # ---------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLO Pose Video Pipeline")
-    parser.add_argument("model", choices=list(MODEL_CODES), nargs="?", default="small",
-                        help="YOLOv8-pose variant: nano | small | medium | large (default: small)")
+    parser.add_argument("model", choices=list(MODEL_CODES), nargs="?", default="large",
+                        help="YOLO-pose scale: nano | small | medium | large | xlarge (default: large)")
+    parser.add_argument("--yolo-version", choices=["8", "11", "26"], default="26",
+                        help="YOLO generation to use (default: 26)")
     parser.add_argument("--video", default=None,
                         help="Path to the input video file (opens file picker if omitted)")
     parser.add_argument("--clean", action="store_true",
@@ -81,15 +84,19 @@ if __name__ == "__main__":
     video_path = args.video
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     frames_dir = "frames"
-    output_dir = os.path.join("pose_results", video_name, args.model)
-    model_path = os.path.join("models", f"yolov8{MODEL_CODES[args.model]}-pose.pt")
+    output_dir = os.path.join("pose_results", video_name, f"yolo{args.yolo_version}_{args.model}")
+    # v8 uses the "yolov8" prefix; v11 and v26 use "yolo11" / "yolo26"
+    prefix = f"yolov{args.yolo_version}" if args.yolo_version == "8" else f"yolo{args.yolo_version}"
+    model_path = os.path.join("models", f"{prefix}{MODEL_CODES[args.model]}-pose.pt")
     output_video = os.path.join(output_dir, f"{video_name}_output.mp4")
 
     source_fps = get_video_fps(video_path)
     print(f"[INFO] Detected source FPS: {source_fps:.3f}")
 
+    # Step 1: dump every frame to JPEG files in frames_dir
     print("[INFO] Extracting frames...")
     extract_frames(video_path, frames_dir)
+    # Step 2: run YOLOv8-pose on each frame → keypoint JSONs + barbell_track.json
     run_pose_inference(frames_dir, output_dir, model_path=model_path)
 
     meta_path = os.path.join(output_dir, "meta.json")
