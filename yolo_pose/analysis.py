@@ -11,7 +11,7 @@ from detect_concentric import detect_concentric
 from utils import compute_velocity, remove_outliers, smooth_positions
 
 # None | "ruptures" | "peaks" | "both"
-CONCENTRIC_METHOD = "both"
+CONCENTRIC_METHOD = "ruptures"
 MIN_FRAMES = 5             # minimum segment length (frames) to be considered a candidate
 MERGE_MIN_VEL = 50.0       # px/s; segments below this avg velocity are excluded from merge runs
 EXTENSION_LOOKAHEAD = 30   # frames; max boundary extension per side after candidate selection
@@ -61,8 +61,8 @@ def _draw_segment_overlay(ax, segments):
 
 
 def _draw_ruptures_panel(ax, raw_pos, smooth_pos, smooth_vel, ruptures_phases, segments):
-    ax.plot(raw_pos, label="Raw Position", alpha=0.4)
-    ax.plot(smooth_pos, label="Smoothed Position (S-G)", linewidth=2)
+    ax.plot(raw_pos, label="Raw Position", alpha=0.4, color="steelblue")
+    ax.plot(smooth_pos, label="Smoothed Position (S-G)", linewidth=2, color="orange")
     _draw_segment_overlay(ax, segments)
 
     multi = len(ruptures_phases) > 1
@@ -78,13 +78,13 @@ def _draw_ruptures_panel(ax, raw_pos, smooth_pos, smooth_vel, ruptures_phases, s
         y_offset = (y_top - y_lo) * 0.05
         if multi:
             ax.text(mid, y_top - y_offset, f"Rep {i + 1}\navg {avg_vel:.1f} | max {max_vel:.1f} px/s",
-                    fontsize=8, ha="center", color="darkgreen", va="top")
+                    fontsize=8, ha="center", color="limegreen", va="top")
         else:
-            ax.text(start + 1, y_top - y_offset, "Start", fontsize=8, color="green", va="top")
-            ax.text(end + 1, y_top - y_offset, "Lockout", fontsize=8, color="darkgreen", va="top")
+            ax.text(start + 1, y_top - y_offset, "Start", fontsize=8, color="limegreen", va="top")
+            ax.text(end + 1, y_top - y_offset, "Lockout", fontsize=8, color="limegreen", va="top")
             ax.text(mid, y_top - y_offset, f"avg {avg_vel:.1f} | max {max_vel:.1f} px/s",
-                    fontsize=8, ha="center", color="darkgreen", va="top",
-                    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="green", alpha=0.8))
+                    fontsize=8, ha="center", color="limegreen", va="top",
+                    bbox=dict(boxstyle="round,pad=0.2", fc="#1e1e1e", ec="limegreen", alpha=0.8))
 
     n = len(ruptures_phases)
     ax.set_title(f"Ruptures — Detected Concentric Phase{'s' if n != 1 else ''} ({n} rep{'s' if n != 1 else ''})")
@@ -96,8 +96,8 @@ def _draw_ruptures_panel(ax, raw_pos, smooth_pos, smooth_vel, ruptures_phases, s
 
 
 def _draw_peaks_panel(ax, raw_pos, smooth_pos, smooth_vel, peaks_phases):
-    ax.plot(raw_pos, label="Raw Position", alpha=0.4)
-    ax.plot(smooth_pos, label="Smoothed Position (S-G)", linewidth=2)
+    ax.plot(raw_pos, label="Raw Position", alpha=0.4, color="steelblue")
+    ax.plot(smooth_pos, label="Smoothed Position (S-G)", linewidth=2, color="orange")
 
     for i, (trough, peak) in enumerate(peaks_phases):
         ax.axvspan(trough, peak, color="green", alpha=0.15)
@@ -124,7 +124,7 @@ def _draw_peaks_panel(ax, raw_pos, smooth_pos, smooth_vel, peaks_phases):
 def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
                   concentric_method=None,
                   ruptures_phases=None, ruptures_segments=None,
-                  peaks_phases=None):
+                  peaks_phases=None, fps=30.0):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     ruptures_phases = ruptures_phases or []
@@ -132,9 +132,10 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
 
     show_ruptures_panel = concentric_method in ("ruptures", "both")
     show_peaks_panel = concentric_method in ("peaks", "both")
-    n_panels = 2 + int(show_ruptures_panel) + int(show_peaks_panel)
+    n_panels = 1 + int(show_ruptures_panel) + int(show_peaks_panel)
 
-    figsize_h = {2: 8, 3: 12, 4: 16}[n_panels]
+    figsize_h = {1: 6, 2: 10, 3: 14}[n_panels]
+    plt.style.use("dark_background")
     plt.figure(figsize=(14, figsize_h))
 
     panel = 1
@@ -151,48 +152,10 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
         _draw_peaks_panel(ax, raw_pos, smooth_pos, smooth_vel, peaks_phases)
         panel += 1
 
-    # --- Position panel ---
-    ax1 = plt.subplot(n_panels, 1, panel)
-    ax1.plot(raw_pos, label="Raw Position", alpha=0.4)
-    ax1.plot(smooth_pos, label="Smoothed Position (S-G)", linewidth=2)
-
-    if concentric_method == "ruptures" and ruptures_segments:
-        _draw_segment_overlay(ax1, ruptures_segments)
-
-    if concentric_method == "ruptures" and ruptures_phases:
-        multi = len(ruptures_phases) > 1
-        for i, (start, end) in enumerate(ruptures_phases):
-            ax1.axvspan(start, end, color="green", alpha=0.15,
-                        label="Concentric Phase" if i == 0 else "_nolegend_")
-            ax1.axvline(start, color="green", linestyle="--", linewidth=1.4)
-            ax1.axvline(end, color="darkgreen", linestyle="--", linewidth=1.4)
-            y_top = ax1.get_ylim()[1]
-            if multi:
-                ax1.text((start + end) / 2, y_top, f"Rep {i + 1}",
-                         fontsize=8, ha="center", color="darkgreen", va="top")
-            else:
-                ax1.annotate("Start", xy=(start, y_top), xytext=(start + 1, y_top),
-                             fontsize=8, color="green", va="top")
-                ax1.annotate("Lockout", xy=(end, y_top), xytext=(end + 1, y_top),
-                             fontsize=8, color="darkgreen", va="top")
-
-    if concentric_method == "peaks":
-        for i, (trough, peak) in enumerate(peaks_phases):
-            ax1.axvspan(trough, peak, color="green", alpha=0.15,
-                        label="Concentric Phase" if i == 0 else "_nolegend_")
-
-    ax1.set_title("Barbell Vertical Position (px, upward = positive)")
-    ax1.set_xlabel("Frame")
-    ax1.set_ylabel("Position")
-    ax1.xaxis.set_major_locator(MultipleLocator(50))
-    ax1.tick_params(axis='x', labelsize=7)
-    ax1.legend()
-    panel += 1
-
     # --- Velocity panel ---
     ax2 = plt.subplot(n_panels, 1, panel)
-    ax2.plot(raw_vel, label="Raw Velocity", alpha=0.4)
-    ax2.plot(smooth_vel, label="Smoothed Velocity (S-G)", linewidth=2)
+    ax2.plot(raw_vel, label="Raw Velocity", alpha=0.4, color="steelblue")
+    ax2.plot(smooth_vel, label="Smoothed Velocity (S-G)", linewidth=2, color="orange")
 
     if concentric_method == "ruptures" and ruptures_phases:
         multi = len(ruptures_phases) > 1
@@ -201,25 +164,25 @@ def plot_analysis(raw_pos, smooth_pos, raw_vel, smooth_vel, out_path,
                         label="Concentric Phase" if i == 0 else "_nolegend_")
             ax2.axvline(start, color="green", linestyle="--", linewidth=1.2)
             ax2.axvline(end, color="darkgreen", linestyle="--", linewidth=1.2)
-            avg_vel = float(np.mean(smooth_vel[start:end]))
-            max_vel = float(np.max(smooth_vel[start:end]))
-            if multi:
-                label = f"R{i + 1}: avg {avg_vel:.1f} | max {max_vel:.1f} px/s"
-            else:
-                label = f"avg {avg_vel:.1f} | max {max_vel:.1f} px/s"
-            ax2.text(start, ax2.get_ylim()[1], label,
-                     fontsize=7 if multi else 9, color="darkgreen", va="top", ha="left",
-                     bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="green", alpha=0.85))
 
     if concentric_method == "peaks":
         for i, (trough, peak) in enumerate(peaks_phases):
             ax2.axvspan(trough, peak, color="green", alpha=0.15,
                         label="Concentric Phase" if i == 0 else "_nolegend_")
-            avg_vel = float(np.mean(smooth_vel[trough:peak]))
-            max_vel = float(np.max(smooth_vel[trough:peak]))
-            ax2.text(trough, ax2.get_ylim()[1],
-                     f"R{i + 1}: avg {avg_vel:.1f} | max {max_vel:.1f} px/s",
-                     fontsize=7, color="darkgreen", va="top", ha="left")
+
+    # Rep table (upper-right of velocity panel)
+    table_phases = ruptures_phases if concentric_method in ("ruptures", "both") else peaks_phases
+    if table_phases:
+        header = f"{'Rep':>3}  {'Avg (px/s)':>10}  {'Max (px/s)':>10}  {'Time':>5}"
+        rows = [header]
+        for i, (start, end) in enumerate(table_phases):
+            avg_v = float(np.mean(smooth_vel[start:end]))
+            max_v = float(np.max(smooth_vel[start:end]))
+            duration = (end - start) / fps
+            rows.append(f"{i + 1:>3}  {avg_v:>10.0f}  {max_v:>10.0f}  {duration:>5.2f}s")
+        ax2.text(0.98, 0.97, "\n".join(rows), transform=ax2.transAxes,
+                 fontsize=8, va="top", ha="right", fontfamily="monospace",
+                 bbox=dict(boxstyle="round,pad=0.5", fc="#1e1e1e", ec="gray", alpha=0.85))
 
     ax2.set_title("Barbell Velocity (px/s)")
     ax2.set_xlabel("Frame")
@@ -268,7 +231,7 @@ if __name__ == "__main__":
         print(f"[INFO] Using FPS from meta.json: {FPS:.3f}")
     else:
         FPS = args.fps
-        print(f"[INFO] meta.json not found — using --fps default: {FPS}")
+        print(f"[WARN] meta.json not found for this track — assuming fps={FPS:.3g} (pass --fps to override)")
 
     track = load_track(TRACK_PATH)
 
@@ -330,4 +293,5 @@ if __name__ == "__main__":
                   concentric_method=CONCENTRIC_METHOD,
                   ruptures_phases=ruptures_phases,
                   ruptures_segments=ruptures_segments,
-                  peaks_phases=peaks_phases)
+                  peaks_phases=peaks_phases,
+                  fps=FPS)
