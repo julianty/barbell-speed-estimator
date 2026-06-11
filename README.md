@@ -10,7 +10,7 @@ Estimates barbell velocity from workout videos using computer vision. Three pipe
 
 | Pipeline | Tracks | Output | GPU required? |
 |---|---|---|---|
-| **YOLO Pose** (recommended) | Wrist keypoints as barbell proxy | px/s | No |
+| **YOLO Pose** (recommended) | Wrist keypoints as barbell proxy (YOLO26) | px/s | No |
 | **YOLO-seg** | Barbell plate (instance segmentation) | m/s | No (faster with GPU) |
 | **SAM2** (experimental) | Barbell plate (video segmentation) | m/s | Recommended — see note |
 
@@ -45,24 +45,29 @@ SAM2 has known build conflicts with certain CUDA/driver combinations, particular
 
 ## Primary Pipeline — YOLO Pose
 
-Uses YOLOv8-pose wrist keypoints as a proxy for the barbell. Reliable across deadlifts and squats; does not require plate visibility or calibration. Outputs velocity in px/s.
+Uses YOLO26-pose wrist keypoints as a proxy for the barbell. Reliable across deadlifts and squats; does not require plate visibility or calibration. Outputs velocity in px/s.
+
+![Annotated output video](images/pose_output_demo.gif)
 
 ```bash
-# Run the pipeline (default model: small)
+# Run the pipeline (default model: large, default YOLO version: 26)
 python yolo_pose/pose_velocity.py --video videos/deadlift.mov
 
-# Choose model size: nano | small | medium | large (positional argument)
+# Choose model size: nano | small | medium | large | xlarge (positional argument)
 python yolo_pose/pose_velocity.py large --video videos/deadlift.mov
+
+# Use a specific YOLO generation (8 | 11 | 26, default: 26)
+python yolo_pose/pose_velocity.py --yolo-version 26 --video videos/deadlift.mov
 
 # Delete intermediate frames and keypoint JSONs after reconstruction
 python yolo_pose/pose_velocity.py --video videos/deadlift.mov --clean
 
 # Run analysis and plot velocity (after pose_velocity.py)
 python yolo_pose/analysis.py
-python yolo_pose/analysis.py --track pose_results/deadlift/small/barbell_track.json
+python yolo_pose/analysis.py --track pose_results/deadlift/large/barbell_track.json
 ```
 
-**Output** (written to `yolo_pose/pose_results/<video>/<model>/`):
+**Output** (written to `pose_results/<video>/<model>/`):
 - `barbell_track.json` — bar centroid per frame
 - `meta.json` — FPS and video metadata
 - `bar_speed.png` — position and velocity plots
@@ -80,11 +85,11 @@ Configure at the top of `yolo_pose/analysis.py`:
 
 | Variable | Default | Description |
 |---|---|---|
-| `CONCENTRIC_METHOD` | `"both"` | `None` \| `"ruptures"` \| `"peaks"` \| `"both"` |
+| `CONCENTRIC_METHOD` | `"ruptures"` | `None` \| `"ruptures"` \| `"peaks"` \| `"both"` |
 | `MIN_FRAMES` | `5` | Minimum segment length (frames) to be a candidate |
 | `MERGE_MIN_VEL` | `50.0` | px/s — segments below this excluded from merge runs |
 | `EXTENSION_LOOKAHEAD` | `30` | Max boundary extension per side (frames) |
-| `MIN_VEL_RATIO` | `0.50` | Reject candidates below this fraction of median candidate velocity |
+| `MIN_REP_RATIO` | `0.60` | Reject candidates covering less than this fraction of expected rep displacement |
 
 ---
 
@@ -179,7 +184,7 @@ All output directories are created automatically by the scripts when they first 
 
 | Directory | Created by | Contents |
 |---|---|---|
-| `yolo_pose/pose_results/` | `yolo_pose/pose_velocity.py` | Barbell track JSON, annotated video, velocity plots |
+| `pose_results/` | `yolo_pose/pose_velocity.py` | Barbell track JSON, annotated video, velocity plots |
 | `yolo_results/` | `yolo_seg/yolo_velocity.py` | `velocities.csv` |
 | `sam2_results/` | `sam2/barbell_velocity.py` | `velocities.csv` |
 

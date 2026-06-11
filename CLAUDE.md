@@ -54,7 +54,7 @@ python yolo_pose/analysis.py --track pose_results/deadlift/small/barbell_track.j
 | `MIN_FRAMES` | `5` | Minimum segment length (frames) to be a candidate |
 | `MERGE_MIN_VEL` | `50.0` | px/s; segments below this avg velocity excluded from merge runs |
 | `EXTENSION_LOOKAHEAD` | `30` | Max boundary extension per side (frames) after candidate selection |
-| `MIN_VEL_RATIO` | `0.50` | Reject candidates below this fraction of the median candidate velocity |
+| `MIN_REP_RATIO` | `0.60` | Fraction of estimated full-rep displacement a candidate must cover |
 
 **Output:** `pose_results/<video>/<model>/barbell_track.json` + annotated video + `bar_speed.png` plot
 
