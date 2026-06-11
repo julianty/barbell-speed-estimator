@@ -187,6 +187,23 @@ The `videos/` directory is also excluded — bring your own footage. Suggested s
 
 ---
 
+## Intended use case
+
+The natural product form for this pipeline is a web platform where users upload pre-recorded videos of their sets. The existing pipeline runs entirely unchanged in that context — no modifications are needed to support video uploads versus local files. Users record on their phone, upload the video, and receive a velocity plot and per-rep averages in return.
+
+---
+
+## Real-time detection
+
+If live video were required — streaming from a phone during a set and outputting rep velocity as each rep completes — the current pipeline would need two changes:
+
+- **Savitzky-Golay smoothing** requires future frames and cannot run in real-time. It would need to be replaced with a causal filter (e.g. exponential moving average).
+- **PELT changepoint detection** is an offline algorithm that operates on the full signal. It would need to be replaced with an online method.
+
+A **Hidden Markov Model (HMM)** is a natural fit for the online case. The lift has three well-defined states with known velocity characteristics — rest (~0), concentric (positive), and eccentric (negative) — which map directly onto HMM states. The HMM forward algorithm updates the state probability distribution one frame at a time, making it suitable for real-time use. Average concentric velocity could be output as soon as the model detects a transition from concentric back to rest.
+
+---
+
 ## Notes
 
 - **Y-axis convention:** Upward movement is positive velocity throughout all pipelines. The raw `cy_px` centroid is negated before velocity is computed so that a rising bar reads as a positive value.
