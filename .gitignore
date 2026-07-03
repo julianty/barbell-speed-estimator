@@ -12,6 +12,7 @@ __pycache__/
 *.pyc
 
 bb-speed-env/
+bb-speed-estimator/*
 .venv/
 venv/
 env/
