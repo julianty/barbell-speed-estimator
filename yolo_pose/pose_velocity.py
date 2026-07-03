@@ -72,9 +72,14 @@ if __name__ == "__main__":
                         help="YOLO generation to use (default: 26)")
     parser.add_argument("--video", default=None,
                         help="Path to the input video file (opens file picker if omitted)")
+    parser.add_argument("--fps", type=float, default=None,
+                        help="Downsample inference to this frame rate (default: use the source video's native FPS)")
     parser.add_argument("--clean", action="store_true",
                         help="Delete rendered images after video reconstruction to save disk space")
     args = parser.parse_args()
+
+    if args.fps is not None and args.fps <= 0:
+        parser.error("--fps must be a positive number")
 
     if args.video is None:
         from utils import pick_video_file
@@ -84,24 +89,35 @@ if __name__ == "__main__":
     video_path = args.video
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     frames_dir = "frames"
-    output_dir = os.path.join("pose_results", video_name, f"yolo{args.yolo_version}_{args.model}")
     # v8 uses the "yolov8" prefix; v11 and v26 use "yolo11" / "yolo26"
     prefix = f"yolov{args.yolo_version}" if args.yolo_version == "8" else f"yolo{args.yolo_version}"
     model_path = os.path.join("models", f"{prefix}{MODEL_CODES[args.model]}-pose.pt")
-    output_video = os.path.join(output_dir, f"{video_name}_output.mp4")
 
     source_fps = get_video_fps(video_path)
     print(f"[INFO] Detected source FPS: {source_fps:.3f}")
 
-    # Step 1: dump every frame to JPEG files in frames_dir
+    if args.fps is not None and args.fps > source_fps:
+        print(f"[WARN] --fps {args.fps} exceeds source FPS {source_fps:.3f}; "
+              "ffmpeg would just duplicate frames, so this won't add real information.")
+
+    effective_fps = args.fps if args.fps is not None else source_fps
+    # Sweeping --fps on the same video/model would otherwise silently overwrite prior runs
+    fps_suffix = f"_fps{args.fps:g}" if args.fps is not None else ""
+    output_dir = os.path.join("pose_results", video_name, f"yolo{args.yolo_version}_{args.model}{fps_suffix}")
+    output_video = os.path.join(output_dir, f"{video_name}_output.mp4")
+
+    if args.fps is not None:
+        print(f"[INFO] Downsampling inference to {effective_fps:.3f} FPS")
+
+    # Step 1: dump frames to JPEG files in frames_dir (resampled to --fps if given)
     print("[INFO] Extracting frames...")
-    extract_frames(video_path, frames_dir)
+    extract_frames(video_path, frames_dir, fps=args.fps)
     # Step 2: run YOLOv8-pose on each frame → keypoint JSONs + barbell_track.json
     run_pose_inference(frames_dir, output_dir, model_path=model_path)
 
     meta_path = os.path.join(output_dir, "meta.json")
     with open(meta_path, "w") as f:
-        json.dump({"fps": source_fps, "video": video_path}, f, indent=2)
+        json.dump({"fps": effective_fps, "source_fps": source_fps, "video": video_path}, f, indent=2)
     print(f"[INFO] Wrote metadata to {meta_path}")
 
     images_dir = os.path.join(output_dir, "images")
@@ -110,7 +126,7 @@ if __name__ == "__main__":
     if not image_files:
         print("[ERROR] No rendered images found — skipping video reconstruction.")
     else:
-        frames_to_video(images_dir, output_video, fps=source_fps)
+        frames_to_video(images_dir, output_video, fps=effective_fps)
         delete_dir(frames_dir)
 
         if args.clean:

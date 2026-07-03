@@ -12,10 +12,34 @@ from utils import compute_velocity, remove_outliers, smooth_positions
 
 # None | "ruptures" | "peaks" | "both"
 CONCENTRIC_METHOD = "ruptures"
-MIN_FRAMES = 5             # minimum segment length (frames) to be considered a candidate
 MERGE_MIN_VEL = 50.0       # px/s; segments below this avg velocity are excluded from merge runs
-EXTENSION_LOOKAHEAD = 30   # frames; max boundary extension per side after candidate selection
 MIN_REP_RATIO = 0.60       # candidates must cover at least this fraction of the estimated full-rep displacement
+
+# Frame-count thresholds below were tuned as frame counts against each video's own native
+# FPS (not a fixed global rate). `_frames()` rescales them by (inference_fps / source_fps),
+# so a run at native FPS (the default, no --fps) reproduces these counts exactly regardless
+# of what that native FPS is, and only a downsampled --fps run rescales them.
+MIN_FRAMES_REF = 5              # minimum segment length (frames, at source FPS) to be a candidate
+EXTENSION_LOOKAHEAD_REF = 30    # max boundary extension per side (frames, at source FPS)
+OUTLIER_WINDOW_REF = 3          # remove_outliers median-comparison half-width (frames, at source FPS)
+SMOOTH_WINDOW_REF = 9           # savgol filter length (frames, at source FPS)
+PEAKS_MIN_FRAMES_REF = 20       # detect_concentric_peaks min trough-to-peak span (frames, at source FPS)
+
+
+def _frames(ref_frames, scale, min_value=1, label=None):
+    value = max(min_value, round(ref_frames * scale))
+    if label and round(ref_frames * scale) < min_value:
+        print(f"[WARN] {label} floored to {min_value} frame(s) at this FPS — "
+              "duration-based filtering for it is effectively disabled.")
+    return value
+
+
+def _odd_savgol_window(ref_frames, scale, data_len):
+    """Time-scaled savgol window, clamped to the track length; no polyorder floor."""
+    window = max(1, round(ref_frames * scale))
+    window += 1 if window % 2 == 0 else 0
+    max_window = max(1, data_len if data_len % 2 else data_len - 1)
+    return min(window, max_window)
 
 
 def load_track(track_path):
@@ -228,10 +252,16 @@ if __name__ == "__main__":
         with open(meta_path) as f:
             meta = json.load(f)
         FPS = meta["fps"]
-        print(f"[INFO] Using FPS from meta.json: {FPS:.3f}")
+        SOURCE_FPS = meta.get("source_fps", FPS)
+        print(f"[INFO] Using FPS from meta.json: {FPS:.3f} (source: {SOURCE_FPS:.3f})")
     else:
         FPS = args.fps
+        SOURCE_FPS = FPS
         print(f"[WARN] meta.json not found for this track — assuming fps={FPS:.3g} (pass --fps to override)")
+
+    # Ratio of inference FPS to the video's own native FPS; 1.0 for a native-FPS run (the
+    # default), so frame-count thresholds below reproduce their tuned values exactly.
+    FPS_SCALE = FPS / SOURCE_FPS
 
     track = load_track(TRACK_PATH)
 
@@ -240,11 +270,18 @@ if __name__ == "__main__":
 
     # 2. Remove outliers BEFORE smoothing
     # window: half-width of median comparison; threshold: max deviation (px) before a point is replaced
-    clean_positions = remove_outliers(raw_positions, window=3, threshold=50)
+    outlier_window = _frames(OUTLIER_WINDOW_REF, FPS_SCALE, label="outlier window")
+    clean_positions = remove_outliers(raw_positions, window=outlier_window, threshold=50)
 
     # 3. Smooth the cleaned signal
     # window: S-G filter length in frames (must be odd, larger = smoother); poly: polynomial order
-    smooth_positions_arr = smooth_positions(clean_positions, window=9, poly=3)
+    smooth_poly = 3
+    smooth_window = _odd_savgol_window(SMOOTH_WINDOW_REF, FPS_SCALE, len(clean_positions))
+    if smooth_window <= smooth_poly:
+        smooth_poly = max(0, smooth_window - 1)
+        print(f"[WARN] Smoothing window ({smooth_window} frames) too small for the default "
+              f"polynomial order at this FPS — reduced polyorder to {smooth_poly}")
+    smooth_positions_arr = smooth_positions(clean_positions, window=smooth_window, poly=smooth_poly)
 
     # 4. Compute velocities
     raw_velocity = compute_velocity(clean_positions, FPS)
@@ -255,13 +292,15 @@ if __name__ == "__main__":
     peaks_phases = []
 
     if CONCENTRIC_METHOD in ("ruptures", "both"):
-        pen = 20
+        pen = 20  # PELT penalty on the raw px/frame diff signal; not fps-scaled, retune by hand if needed
+        min_frames = _frames(MIN_FRAMES_REF, FPS_SCALE, label="MIN_FRAMES")
+        extension_lookahead = _frames(EXTENSION_LOOKAHEAD_REF, FPS_SCALE, label="EXTENSION_LOOKAHEAD")
         ruptures_phases, ruptures_segments = detect_concentric(
             smooth_positions_arr, method="ruptures", pen=pen,
-            min_frames=MIN_FRAMES,
+            min_frames=min_frames,
             smooth_velocity=smooth_velocity,
             merge_min_vel=MERGE_MIN_VEL,
-            extension_lookahead=EXTENSION_LOOKAHEAD,
+            extension_lookahead=extension_lookahead,
             min_rep_ratio=MIN_REP_RATIO,
             return_segments=True,
         )
@@ -284,7 +323,9 @@ if __name__ == "__main__":
 
     if CONCENTRIC_METHOD in ("peaks", "both"):
         print("[INFO] Peaks detection:")
-        peaks_phases = detect_concentric(smooth_positions_arr, method="peaks", fps=FPS)
+        peaks_min_frames = _frames(PEAKS_MIN_FRAMES_REF, FPS_SCALE, label="peaks min_frames")
+        peaks_phases = detect_concentric(smooth_positions_arr, method="peaks",
+                                          min_frames=peaks_min_frames, fps=FPS)
 
     # 6. Plot
     plot_analysis(clean_positions, smooth_positions_arr,
