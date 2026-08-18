@@ -8,6 +8,7 @@ yolo_pose/frames/
 *.mp4
 *.mov
 *.pt
+*.mlpackage
 
 __pycache__/
 *.pyc
@@ -17,3 +18,5 @@ bb-speed-estimator/*
 .venv/
 venv/
 env/
+
+.DS_Store
