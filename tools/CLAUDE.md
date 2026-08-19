@@ -34,6 +34,20 @@ python tools/tune_extension.py --symmetric
 python tools/tune_extension.py --configs fps30 --k 0 0.05 0.1 --lookahead-s 0.2 0.5
 ```
 
+**`tools/tune_lockout.py`** — Follow-on to `tune_extension.py`, scoring the same stage-7 rule on **lockout (rep end) error** rather than duration, and on the **forward walk only** so the separate rep-start bug cannot contaminate it. Scores against both the 5 human-adjudicated `truth_end_s` values and each clip's native-fps lockout. Re-analyses the saved `sweep/` tracks; no inference. Result was negative — see the ledger's Stage 1c before re-running: the extension walk contributes only the tail, the stop threshold does not pay for itself, and a wider smoothing window makes it worse.
+
+```bash
+python tools/tune_lockout.py
+python tools/tune_lockout.py --configs native fps15 --k 0 0.1 0.3 --norm peak mean
+```
+
+**`tools/check_other_lifts.py`** — Checks the 30 fps decision on squat and deadlift, which the bench-only fps sweep never covered. The source videos are not in this repo, so it decimates the native-fps tracks checked into the app's golden fixtures (`test/fixtures/*.golden.json`, `input_positions`) and re-analyses them with normalized constants. Tests the **analysis stage only** — it cannot tell you whether YOLO pose still tracks the wrist at 30 fps. Runs every phase offset, so the spread between offsets is the probe's own noise floor. Result: 30 fps transfers (ledger, Stage 1d).
+
+```bash
+python tools/check_other_lifts.py
+python tools/check_other_lifts.py --strides 2 --min-duration 0.5   # drop the natively-spurious reps
+```
+
 **`tools/extract_rep_clips.py`** — Cuts the reps where two sweep configs disagree on concentric duration into slow-motion annotated clips (both runs' start/lockout marks drawn over the bar-height trace), so a human can adjudicate which boundary is right. Writes `sweep/_ground_truth/<clip>_repN.mp4` plus `disputed_reps.json` with `truth_start_s`/`truth_end_s` fields to fill in by hand. Re-extracts full clips via ffmpeg rather than seeking, so the overlay stays frame-aligned with the track.
 
 ```bash
