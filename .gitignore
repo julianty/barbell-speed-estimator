@@ -3,6 +3,8 @@
 /runs
 yolo_pose/pose_results/*
 yolo_pose/frames/
+# tools/sweep_configs.py output: per-frame tracks/signals for every fps config
+/sweep/
 /portfolio_analysis/
 
 *.mp4
