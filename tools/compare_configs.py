@@ -2,7 +2,7 @@
 against the native-fps baseline.
 
 The metric is the one pre-registered in
-`barbell-velocity-app/RESOLUTION_DOWNSCALING.md` (written before any results
+`barbell-velocity-app/LEDGER.md` (written before any results
 were seen, deliberately, so the gate can't be tuned to flatter a config):
 
   Tier 1  rep-level agreement — THE GATE. Config reps are matched to baseline

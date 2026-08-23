@@ -1,6 +1,6 @@
 """Check the 30 fps decision on squat and deadlift, not just bench press.
 
-The whole fps investigation (see `barbell-velocity-app/RESOLUTION_DOWNSCALING.md`)
+The whole fps investigation (see `barbell-velocity-app/LEDGER.md`)
 ran on 8 bench-press clips. Bench is the *easiest* case for a wrist-proxy
 tracker: short travel, small camera-relative motion, a fixed torso. Squat and
 deadlift have longer bar paths, larger and faster whole-body motion, and (for

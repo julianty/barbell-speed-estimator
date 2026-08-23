@@ -1,7 +1,7 @@
 """Tune the concentric boundary-extension rule for fps robustness.
 
 Stage 1 of the analysis-speed investigation (see
-`barbell-velocity-app/RESOLUTION_DOWNSCALING.md`) found that rep *detection*
+`barbell-velocity-app/LEDGER.md`) found that rep *detection*
 survives down to 10 fps but rep *boundaries* drift, and that about half the
 velocity error is that drift rather than signal loss. The suspect is stage 7 of
 `detect_concentric.py`, which walks each boundary outward while `velocity > 0`.

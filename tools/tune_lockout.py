@@ -4,7 +4,7 @@ Follow-on to `tools/tune_extension.py`, which swept the same stage-7 rule but
 scored it on rep *duration* at 30 fps and found nothing (Stage 1b, negative).
 That negative result does not cover the lockout: at 30 fps the plateau walk is
 not the dominant error term, so duration averaged it away. The ledger
-(`barbell-velocity-app/RESOLUTION_DOWNSCALING.md`, "15 fps revisited") isolates
+(`barbell-velocity-app/LEDGER.md`, "15 fps revisited") isolates
 the failure at 15 fps instead — at lockout the bar plateaus while the lifter
 holds it before racking, and the forward walk crosses the whole hold, ending the
 rep where the *descent* begins (worst case +614 ms).

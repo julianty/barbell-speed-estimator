@@ -5,7 +5,7 @@ resulting track *twice* — once with the analysis constants rescaled by
 inference_fps/source_fps ("normalized", what `analysis.py` does today) and once
 with them left as raw frame counts ("fixed", what the Flutter app's
 `AnalysisConfig` does today). The delta between those two arms is blocking
-finding A in `barbell-velocity-app/RESOLUTION_DOWNSCALING.md`, and it is why
+finding A in `barbell-velocity-app/LEDGER.md`, and it is why
 every fps is analysed twice instead of once.
 
 Resolution is deliberately NOT swept: Stage 0 showed model time is flat against
