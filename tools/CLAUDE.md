@@ -61,3 +61,17 @@ python tools/extract_rep_clips.py --config fps15 --threshold 0.2 --out-fps 10
 python tools/plot_velocity.py
 python tools/plot_velocity.py --input sam2_results/deadlift/velocities.csv --show
 ```
+
+**Pose-backend comparison** (the app's LEDGER.md, launch checklist item 1: replacing AGPL yolo26s-pose). Results so far are recorded there.
+
+- **`tools/compare_pose_backends.py`** — Runs Apple Vision, MoveNet Thunder/Lightning, or yolo26s on the regression clips at 30 fps, builds the wrist-midpoint track, analyses it with `sweep_configs.analyse`, and scores reps against the full-res YOLO run in `sweep/<clip>/fps30`. `--max-edge 640` matches the app's decode size and scales keypoints back to source pixels, as the app does. Writes `sweep/<clip>/fps30_<backend>[_640]/` and `sweep/_backends[_640]/REPORT.md`.
+- **`tools/vision_pose.swift`** — Runs `VNDetectHumanBodyPoseRequest` (macOS) over a frames dir and writes the joints in COCO-17 order. Called by the script above.
+- **`tools/movenet_pose.py`** — MoveNet TFLite with the tutorial's crop-region tracking. Needs `ai-edge-litert`, which has no wheel for this venv's Python 3.13, so it runs from a separate Python 3.12 env passed as `--movenet-python`. Models come from TF Hub: `lite-model/movenet/singlepose/{thunder,lightning}/tflite/float16/4`.
+- **`tools/label_rep_starts.py`** — Blinded slow-motion clips of reps whose candidate starts disagree, for hand labelling. Writes `sweep/_ground_truth_starts/{*.mp4, all_reps.mp4, labels.json}`. Keeps labels already given; `--only video:rep` re-renders a subset.
+- **`tools/score_rep_starts.py`** — Scores every run's rep starts against the hand labels.
+
+```bash
+python tools/compare_pose_backends.py --movenet-python <py3.12 env>/bin/python --movenet-dir <dir>
+python tools/compare_pose_backends.py --max-edge 640 --backend vision --backend yolo26s
+python tools/label_rep_starts.py && python tools/score_rep_starts.py
+```
