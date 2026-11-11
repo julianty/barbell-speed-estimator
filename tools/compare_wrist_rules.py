@@ -63,15 +63,49 @@ def select_person(people, last, sx, sy, min_conf):
     return max(cands, key=lambda c: c[2])[0]
 
 
-def wrist_states(kp_json, src_size, min_conf):
+def torso_point(p, sx, sy, min_conf=0.1):
+    """Mean of the visible shoulders and hips, else the box centre: where the
+    person IS, independent of whether their wrists are visible."""
+    pts = [p["kp"][j] for j in (5, 6, 11, 12) if p["kp"][j][2] >= min_conf]
+    if pts:
+        return (np.mean([q[0] for q in pts]) * sx, np.mean([q[1] for q in pts]) * sy)
+    b = p["box"]
+    return ((b[0] + b[2]) / 2 * sx, (b[1] + b[3]) / 2 * sy)
+
+
+def select_by_torso(people, last_torso, sx, sy):
+    """Follow a body, not a pair of wrists: the person whose torso is nearest
+    the last selected torso; on the first frame, the largest box. A lifter
+    whose wrists are hidden stays selected, instead of handing the track to
+    whoever's wrists are visible."""
+    if not people:
+        return None
+    if last_torso is None:
+        return max(people, key=lambda p: (p["box"][2] - p["box"][0]) * (p["box"][3] - p["box"][1]))
+    return min(people, key=lambda p: (torso_point(p, sx, sy)[0] - last_torso[0]) ** 2
+               + (torso_point(p, sx, sy)[1] - last_torso[1]) ** 2)
+
+
+def wrist_states(kp_json, src_size, min_conf, select="wrist"):
     """Per frame: (L, R) in source px, each None if lost, for the selected
     person. Selection follows the visible-wrist point, so it is shared by every
     rule except ignore."""
     w, h = src_size
     sx, sy = w / kp_json["frame_size"][0], h / kp_json["frame_size"][1]
     max_jump = MAX_JUMP_FRACTION * (w ** 2 + h ** 2) ** 0.5
-    out, last = [], None
+    out, last, last_torso = [], None, None
     for fr in kp_json["frames"]:
+        if select == "torso":
+            p = select_by_torso(fr["people"], last_torso, sx, sy)
+            if p is None:
+                out.append((None, None, None))
+                continue
+            last_torso = torso_point(p, sx, sy)
+            l, r = p["kp"][LW], p["kp"][RW]
+            L = (l[0] * sx, l[1] * sy) if l[2] >= min_conf else None
+            R = (r[0] * sx, r[1] * sy) if r[2] >= min_conf else None
+            out.append((L, R, ((l[0] + r[0]) / 2 * sx, (l[1] + r[1]) / 2 * sy)))
+            continue
         p = select_person(fr["people"], last, sx, sy, min_conf)
         if p is None:
             out.append((None, None, None))
