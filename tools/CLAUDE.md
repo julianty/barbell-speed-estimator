@@ -75,3 +75,5 @@ python tools/compare_pose_backends.py --movenet-python <py3.12 env>/bin/python -
 python tools/compare_pose_backends.py --max-edge 640 --backend vision --backend yolo26s
 python tools/label_rep_starts.py && python tools/score_rep_starts.py
 ```
+- **`tools/compare_wrist_rules.py`** — Compares rules for building the bar point when a wrist is lost (ignore, fallback, drop, offset, hybrid). It works on saved keypoints and scores against the hand labels. `--save-tracks` writes `<run>/rules/<rule>.json` for the review clips. The app ships offset@0.5 (D25).
+- **`tools/render_wrist_review.py`** — Blinded clips around rep velocity peaks, showing wrists and three candidate midpoints, for judging by eye. Writes `sweep/<out>/{*.mp4, all_review.mp4, review.json}`.
