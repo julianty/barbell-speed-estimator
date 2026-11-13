@@ -58,7 +58,7 @@ from sweep_configs import analyse, ARMS  # noqa: E402
 
 FPS = 30.0
 BACKENDS = ["vision", "vision_pad25", "movenet_thunder", "movenet_lightning", "yolo26s",
-            "rtmo", "mediapipe"]
+            "rtmo", "rtmo_coco", "mediapipe"]
 DEFAULT_VIDEOS = [f"deadlift{i}" for i in range(1, 7)] + ["squat2", "squat3"]
 LW, RW = 9, 10
 
@@ -91,9 +91,10 @@ def run_yolo(frames_dir, out_json):
 def run_backend(backend, frames_dir, out_json, args):
     if backend == "yolo26s":
         return run_yolo(frames_dir, out_json)
-    if backend == "rtmo":
+    if backend in ("rtmo", "rtmo_coco"):
+        model = args.rtmo_model if backend == "rtmo" else args.rtmo_coco_model
         cmd = [args.movenet_python, "-I", os.path.join(ROOT, "tools", "rtmo_pose.py"),
-               "--model", args.rtmo_model, frames_dir, out_json]
+               "--model", model, frames_dir, out_json]
         return subprocess.run(cmd, check=True)
     if backend == "mediapipe":
         cmd = [args.movenet_python, "-I", os.path.join(ROOT, "tools", "mediapipe_pose.py"),
@@ -250,6 +251,8 @@ def main():
     p.add_argument("--movenet-python", help="python with ai-edge-litert (3.12 env)")
     p.add_argument("--movenet-dir", help="directory holding movenet_*.tflite")
     p.add_argument("--rtmo-model", help="RTMO end2end.onnx (rtmo backend)")
+    p.add_argument("--rtmo-coco-model", help="COCO-only RTMO end2end.onnx (rtmo_coco backend; "
+                   "see tools/rtmo_swap_weights.py)")
     p.add_argument("--mediapipe-model", help="pose_landmarker_*.task (mediapipe backend)")
     p.add_argument("--min-conf", type=float, default=0.1,
                    help="wrist confidence below which a wrist counts as lost (default 0.1)")

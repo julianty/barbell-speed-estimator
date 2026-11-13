@@ -24,3 +24,7 @@ env/
 .DS_Store
 
 /barbell-velocity-app/
+# downloaded and converted pose models (licences: see models/README.md)
+/models/
+# Python 3.12 env for tools that need ai-edge-litert, rtmlib, mediapipe, onnx
+/.venv312/
